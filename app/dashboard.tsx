@@ -2,17 +2,12 @@
 import { useEffect, useMemo, useState, useCallback } from "react";
 import { signOut } from "next-auth/react";
 import type { Application, Status } from "@/lib/types";
+import JobSearchView from "./job-search-view";
 
 const STATUS_LABEL: Record<Status, string> = {
   saved: "Saved", applied: "Applied", interview: "Interview", assessment: "Assessment", offer: "Offer", rejected: "Rejected",
 };
 const STATUS_ORDER: Status[] = ["applied", "interview", "assessment", "offer", "rejected"];
-const PRESETS: Record<string, { role: string; salary: number; location: string; remote: boolean }> = {
-  "sdr-70":   { role: "SDR", salary: 70000, location: "Remote", remote: true },
-  "bdr-75":   { role: "BDR", salary: 75000, location: "Remote", remote: true },
-  "ae-100":   { role: "Account Executive", salary: 100000, location: "Remote", remote: true },
-  "sdr-saas": { role: "SaaS SDR", salary: 80000, location: "Remote", remote: true },
-};
 
 function initials(name: string) { return (name || "").split(/\s+/).slice(0, 2).map((w) => w[0]).join("").toUpperCase(); }
 function startOfWeek(d: Date) { const x = new Date(d); x.setHours(0,0,0,0); x.setDate(x.getDate() - x.getDay()); return x; }
@@ -46,8 +41,6 @@ export default function Dashboard({ userEmail, userName }: { userEmail: string; 
   const [showModal, setShowModal] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [syncStatus, setSyncStatus] = useState<string>("");
-  const [sb, setSb] = useState({ role: "SDR", salary: 70000, location: "Remote", remote: true });
-  const [qa, setQa] = useState({ company: "", role: "SDR", location: "Remote", salary: "$70k", link: "" });
 
   const reload = useCallback(async () => {
     const res = await fetch("/api/applications");
@@ -117,10 +110,6 @@ export default function Dashboard({ userEmail, userName }: { userEmail: string; 
       setSyncing(false);
     }
   }
-
-  const indeedUrl    = `https://www.indeed.com/jobs?q=${encodeURIComponent(`${sb.role} $${sb.salary.toLocaleString()}`)}&l=${encodeURIComponent(sb.remote ? "Remote" : sb.location)}${sb.remote ? "&sc=0kf%3Aattr%28DSQF7%29%3B" : ""}`;
-  const wellfoundUrl = `https://wellfound.com/jobs?keywords=${encodeURIComponent(sb.role)}${sb.remote ? "&remote=true" : ""}`;
-  const builtinUrl   = `https://builtin.com/jobs?search=${encodeURIComponent(sb.role)}`;
 
   return (
     <div className="app">
@@ -235,54 +224,7 @@ export default function Dashboard({ userEmail, userName }: { userEmail: string; 
           </section>
         )}
 
-        {view === "search" && (
-          <section className="view">
-            <header className="topbar">
-              <div className="topbar-left">
-                <h1 className="page-title">Job Search</h1>
-                <p className="page-sub">Build a search and launch it on the boards that match your criteria.</p>
-              </div>
-            </header>
-            <section className="panel">
-              <div className="panel-header"><strong>Search builder</strong><span className="muted">Pick a preset or customize.</span></div>
-              <div className="search-builder">
-                <div className="sb-grid">
-                  <label className="sb-field"><span>Role / Title</span><input value={sb.role} onChange={(e) => setSb({...sb, role: e.target.value})} /></label>
-                  <label className="sb-field"><span>Min base salary (USD)</span><input type="number" value={sb.salary} step={5000} onChange={(e) => setSb({...sb, salary: Number(e.target.value)})} /></label>
-                  <label className="sb-field"><span>Location</span><input value={sb.location} onChange={(e) => setSb({...sb, location: e.target.value})} /></label>
-                  <label className="sb-field sb-toggle"><input type="checkbox" checked={sb.remote} onChange={(e) => setSb({...sb, remote: e.target.checked})} /><span>Remote only</span></label>
-                </div>
-                <div className="sb-presets">
-                  <span className="muted">Presets:</span>
-                  {Object.entries(PRESETS).map(([k, p]) => (
-                    <button key={k} className="chip" onClick={() => setSb(p)}>{p.role} · ${p.salary.toLocaleString()}+</button>
-                  ))}
-                </div>
-                <div className="sb-actions">
-                  <a className="board-btn indeed" href={indeedUrl} target="_blank" rel="noopener"><span className="board-logo">in</span><span className="board-name">Search on Indeed</span><span className="board-arrow">→</span></a>
-                  <a className="board-btn wellfound" href={wellfoundUrl} target="_blank" rel="noopener"><span className="board-logo">W</span><span className="board-name">Search on Wellfound</span><span className="board-arrow">→</span></a>
-                  <a className="board-btn builtin" href={builtinUrl} target="_blank" rel="noopener"><span className="board-logo">BI</span><span className="board-name">Search on Built In</span><span className="board-arrow">→</span></a>
-                </div>
-              </div>
-            </section>
-            <section className="panel" style={{ marginTop: 18 }}>
-              <div className="panel-header"><strong>Quick add to tracker</strong><span className="muted">Drop a role you found straight into Applications.</span></div>
-              <div className="quick-add">
-                <input placeholder="Company" value={qa.company} onChange={(e) => setQa({...qa, company: e.target.value})} />
-                <input placeholder="Role title" value={qa.role} onChange={(e) => setQa({...qa, role: e.target.value})} />
-                <input placeholder="Location" value={qa.location} onChange={(e) => setQa({...qa, location: e.target.value})} />
-                <input placeholder="Salary" value={qa.salary} onChange={(e) => setQa({...qa, salary: e.target.value})} />
-                <input placeholder="Job URL" value={qa.link} onChange={(e) => setQa({...qa, link: e.target.value})} />
-                <button className="btn btn-primary" onClick={async () => {
-                  if (!qa.company.trim()) { alert("Company is required."); return; }
-                  await fetch("/api/applications", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...qa, status: "applied", applied_at: isoDate(new Date()), source: "Job Search" }) });
-                  setQa({ company: "", role: "SDR", location: "Remote", salary: "$70k", link: "" });
-                  reload(); setView("applications");
-                }}>Track</button>
-              </div>
-            </section>
-          </section>
-        )}
+        {view === "search" && <JobSearchView onTracked={reload} />}
 
         {view === "calendar" && (
           <CalendarView apps={apps} calAnchor={calAnchor} setCalAnchor={setCalAnchor} />
@@ -448,7 +390,7 @@ function SettingsView({ userEmail, syncing, onSync, syncStatus }: { userEmail: s
             {syncStatus && <p className="muted small">{syncStatus}</p>}
           </div>
         </div>
-        <p className="muted note">Auto-sync runs every 6 hours via cron. Last 60 days of emails are scanned per sync.</p>
+        <p className="muted note">Auto-sync runs daily via cron. Last 60 days of emails are scanned per sync.</p>
       </section>
     </section>
   );
