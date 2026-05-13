@@ -1,5 +1,6 @@
 "use client";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
+import CoverLetterModal, { CoverLetterJob } from "./cover-letter-modal";
 
 interface Job {
   id: string;
@@ -53,6 +54,7 @@ export default function JobSearchView({ onTracked }: { onTracked: () => void }) 
   const [error, setError] = useState("");
   const [page, setPage] = useState(1);
   const [sortBy, setSortBy] = useState<"newest" | "salary">("newest");
+  const [coverJob, setCoverJob] = useState<CoverLetterJob | null>(null);
   const PAGE_SIZE = 25;
 
   async function search(targetSalary = minSalary) {
@@ -102,7 +104,7 @@ export default function JobSearchView({ onTracked }: { onTracked: () => void }) 
     return m ? Number(m[1]) * 1000 : 0;
   }
 
-  const filtered = useMemo(() => {
+  const filtered = (() => {
     let rows = jobs.slice();
     if (query) {
       const q = query.toLowerCase();
@@ -116,7 +118,7 @@ export default function JobSearchView({ onTracked }: { onTracked: () => void }) 
       rows.sort((a, b) => parseSalary(b.salary) - parseSalary(a.salary));
     }
     return rows;
-  }, [jobs, query, sortBy]);
+  })();
 
   const paged = filtered.slice(0, page * PAGE_SIZE);
   const hasMore = paged.length < filtered.length;
@@ -221,6 +223,13 @@ export default function JobSearchView({ onTracked }: { onTracked: () => void }) 
                   </div>
                 </div>
                 <div className="job-row-actions">
+                  <button
+                    className="btn btn-ghost"
+                    onClick={() => setCoverJob({ title: j.title, company: j.company, url: j.url })}
+                    title="Generate AI cover letter"
+                  >
+                    ✍️ Cover
+                  </button>
                   <a className="btn btn-ghost" href={j.url} target="_blank" rel="noopener">Apply</a>
                   <button
                     className={`btn ${tracked.has(j.id) ? "btn-tracked" : "btn-primary"}`}
@@ -242,6 +251,8 @@ export default function JobSearchView({ onTracked }: { onTracked: () => void }) 
           )}
         </>
       )}
+
+      {coverJob && <CoverLetterModal job={coverJob} onClose={() => setCoverJob(null)} />}
     </section>
   );
 }

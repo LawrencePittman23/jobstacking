@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState, useCallback } from "react";
 import { signOut } from "next-auth/react";
 import type { Application, Status } from "@/lib/types";
 import JobSearchView from "./job-search-view";
+import CoverLetterModal, { CoverLetterJob } from "./cover-letter-modal";
 
 const STATUS_LABEL: Record<Status, string> = {
   saved: "Saved", applied: "Applied", interview: "Interview", assessment: "Assessment", offer: "Offer", rejected: "Rejected",
@@ -41,6 +42,7 @@ export default function Dashboard({ userEmail, userName }: { userEmail: string; 
   const [showModal, setShowModal] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [syncStatus, setSyncStatus] = useState<string>("");
+  const [coverJob, setCoverJob] = useState<CoverLetterJob | null>(null);
 
   const reload = useCallback(async () => {
     const res = await fetch("/api/applications");
@@ -205,6 +207,7 @@ export default function Dashboard({ userEmail, userName }: { userEmail: string; 
                         <td>{r.source || "—"}</td>
                         <td>
                           <div className="row-actions">
+                            <button className="row-btn" onClick={() => setCoverJob({ title: r.role || "", company: r.company, url: r.link || undefined })} title="AI cover letter">✍️</button>
                             {r.link && <a className="row-btn" href={r.link} target="_blank" rel="noopener">Open</a>}
                             <button className="row-btn" onClick={() => { setEditing(r); setShowModal(true); }}>Edit</button>
                             <button className="row-btn danger" onClick={() => deleteApp(r.id)}>Delete</button>
@@ -240,6 +243,8 @@ export default function Dashboard({ userEmail, userName }: { userEmail: string; 
       {showModal && (
         <AppModal app={editing} onClose={() => setShowModal(false)} onSave={saveApp} />
       )}
+
+      {coverJob && <CoverLetterModal job={coverJob} onClose={() => setCoverJob(null)} />}
     </div>
   );
 }
@@ -367,10 +372,87 @@ function AnalyticsView({ apps, counts }: { apps: Application[]; counts: Record<s
 }
 
 function SettingsView({ userEmail, syncing, onSync, syncStatus }: { userEmail: string; syncing: boolean; onSync: () => void; syncStatus: string }) {
+  const [profile, setProfile] = useState({ full_name: "", resume_text: "", background: "" });
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+
+  useEffect(() => {
+    (async () => {
+      const res = await fetch("/api/profile");
+      if (res.ok) {
+        const data = await res.json();
+        if (data.profile) {
+          setProfile({
+            full_name: data.profile.full_name || "",
+            resume_text: data.profile.resume_text || "",
+            background: data.profile.background || "",
+          });
+        }
+      }
+      setLoading(false);
+    })();
+  }, []);
+
+  async function saveProfile() {
+    setSaving(true); setSaved(false);
+    try {
+      const res = await fetch("/api/profile", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(profile),
+      });
+      if (!res.ok) throw new Error("save failed");
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2500);
+    } catch {
+      alert("Couldn't save profile.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
   return (
     <section className="view">
-      <header className="topbar"><div className="topbar-left"><h1 className="page-title">Settings</h1><p className="page-sub">Manage Gmail sync and data.</p></div></header>
+      <header className="topbar"><div className="topbar-left"><h1 className="page-title">Settings</h1><p className="page-sub">Profile, integrations, and data.</p></div></header>
+
       <section className="panel">
+        <div className="panel-header"><strong>Profile</strong><span className="muted">Used to generate tailored cover letters.</span></div>
+        <div className="profile-form">
+          <label className="sb-field">
+            <span>Full name</span>
+            <input value={profile.full_name} onChange={(e) => setProfile({ ...profile, full_name: e.target.value })} placeholder="Lawrence Pittman" />
+          </label>
+          <label className="sb-field">
+            <span>Resume — paste plain text (no PDF)</span>
+            <textarea
+              className="profile-textarea"
+              value={profile.resume_text}
+              onChange={(e) => setProfile({ ...profile, resume_text: e.target.value })}
+              placeholder="Paste your resume here as plain text. Include experience, skills, education, and any highlights you'd want a cover letter to reference."
+              rows={14}
+            />
+          </label>
+          <label className="sb-field">
+            <span>Background &amp; motivation (optional)</span>
+            <textarea
+              className="profile-textarea"
+              value={profile.background}
+              onChange={(e) => setProfile({ ...profile, background: e.target.value })}
+              placeholder="What kind of role are you targeting and why? What industries excite you? Any signature wins or talking points the AI should weave in?"
+              rows={5}
+            />
+          </label>
+          <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+            <button className="btn btn-primary" onClick={saveProfile} disabled={loading || saving}>
+              {saving ? "Saving…" : "Save profile"}
+            </button>
+            {saved && <span className="muted" style={{ color: "var(--success)" }}>✓ Saved</span>}
+          </div>
+        </div>
+      </section>
+
+      <section className="panel" style={{ marginTop: 18 }}>
         <div className="panel-header"><strong>Integrations</strong></div>
         <div className="integrations">
           <div className="int-card">
