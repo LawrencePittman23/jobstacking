@@ -2,6 +2,7 @@ import { sql } from "@vercel/postgres";
 import type { Application, Status, User } from "./types";
 
 let initialized = false;
+let profileInitialized = false;
 
 export async function ensureSchema() {
   if (initialized) return;
@@ -38,6 +39,50 @@ export async function ensureSchema() {
   await sql`CREATE INDEX IF NOT EXISTS idx_apps_user ON applications(user_email)`;
   await sql`CREATE INDEX IF NOT EXISTS idx_apps_status ON applications(user_email, status)`;
   initialized = true;
+}
+
+export async function ensureProfileSchema() {
+  if (profileInitialized) return;
+  await sql`
+    CREATE TABLE IF NOT EXISTS user_profiles (
+      email        text PRIMARY KEY,
+      full_name    text,
+      resume_text  text,
+      background   text,
+      updated_at   timestamptz DEFAULT now()
+    )
+  `;
+  profileInitialized = true;
+}
+
+export interface Profile {
+  email: string;
+  full_name: string | null;
+  resume_text: string | null;
+  background: string | null;
+  updated_at?: string;
+}
+
+export async function getProfile(email: string): Promise<Profile | null> {
+  await ensureProfileSchema();
+  const { rows } = await sql<Profile>`
+    SELECT email, full_name, resume_text, background
+    FROM user_profiles WHERE email = ${email}
+  `;
+  return rows[0] ?? null;
+}
+
+export async function upsertProfile(email: string, p: Partial<Profile>) {
+  await ensureProfileSchema();
+  await sql`
+    INSERT INTO user_profiles (email, full_name, resume_text, background)
+    VALUES (${email}, ${p.full_name ?? null}, ${p.resume_text ?? null}, ${p.background ?? null})
+    ON CONFLICT (email) DO UPDATE SET
+      full_name   = EXCLUDED.full_name,
+      resume_text = EXCLUDED.resume_text,
+      background  = EXCLUDED.background,
+      updated_at  = now()
+  `;
 }
 
 export async function upsertUser(email: string, refreshToken?: string | null) {
