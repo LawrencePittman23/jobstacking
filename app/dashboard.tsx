@@ -184,13 +184,13 @@ export default function Dashboard({ userEmail, userName }: { userEmail: string; 
                 <table className="table">
                   <thead>
                     <tr>
-                      <th>Company</th><th>Role</th><th>Location</th><th>Status</th>
-                      <th>Date</th><th>Salary</th><th>Source</th><th></th>
+                      <th>Company</th><th>Role</th><th>Status</th>
+                      <th>Date</th><th>Source</th><th></th>
                     </tr>
                   </thead>
                   <tbody>
                     {filtered.length === 0 ? (
-                      <tr><td colSpan={8} className="empty">No applications. Try syncing Gmail or adding one manually.</td></tr>
+                      <tr><td colSpan={6} className="empty">No applications. Try syncing Gmail or adding one manually.</td></tr>
                     ) : filtered.map((r) => (
                       <tr key={r.id}>
                         <td>
@@ -200,10 +200,8 @@ export default function Dashboard({ userEmail, userName }: { userEmail: string; 
                           </div>
                         </td>
                         <td>{r.role || "—"}</td>
-                        <td>{r.location || "—"}</td>
                         <td><span className={`status-pill status-${r.status}`}>{STATUS_LABEL[r.status]}</span></td>
                         <td><div>{fmtDate(r.applied_at)}</div><div className="company-tag">{relativeDate(r.applied_at)}{r.event_time ? " · " + r.event_time : ""}</div></td>
-                        <td>{r.salary || "—"}</td>
                         <td>{r.source || "—"}</td>
                         <td>
                           <div className="row-actions">
