@@ -1,29 +1,31 @@
-# JobStacking — Application Dashboard
+# JobStacking
 
-A lightweight, static dashboard for tracking job applications.
+Job application tracker with Gmail auto-sync. Built with Next.js, Vercel Postgres, and the Gmail API.
 
-## Run
+## What it does
 
-Open `index.html` directly in a browser, or serve the folder:
+- **Auto-imports** Applied / Interview / Assessment / Offer / Rejected emails from your Gmail into a tracker.
+- **Calendar view** of upcoming interviews and assessments.
+- **Job Search builder** that launches pre-filtered searches on Indeed, Wellfound, and Built In.
+- **Analytics** — funnel + weekly volume.
+- **Daily auto-sync** via Vercel Cron (every 6 hours).
+
+## Setup
+
+See **[SETUP.md](./SETUP.md)** for the full Google Cloud + Vercel walkthrough.
+
+## Stack
+
+- Next.js 14 (App Router) on Vercel
+- NextAuth.js with Google OAuth (Gmail readonly scope)
+- Vercel Postgres
+- googleapis (Gmail API)
+
+## Local dev
 
 ```bash
-python3 -m http.server 8000
-# then visit http://localhost:8000
+cp .env.example .env.local
+# fill in your values
+npm install
+npm run dev
 ```
-
-## Features
-
-- Sidebar navigation (Dashboard, Applications, Companies, Calendar, Analytics, Documents, Settings)
-- Stats overview cards (Total / In Progress / Interviews / Offers / Rejected)
-- Filter tabs by status (All / Applied / Interview / Offer / Rejected / Saved)
-- Search by company, role, or location
-- Sort by date, company, or role
-- Add new applications via modal
-- Per-row View / Delete actions
-- Data persists to `localStorage`
-
-## Files
-
-- `index.html` — markup
-- `styles.css` — design system + layout
-- `app.js` — state, rendering, interactions
