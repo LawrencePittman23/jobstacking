@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 interface Job {
   id: string;
@@ -13,6 +13,15 @@ interface Job {
 }
 
 const SALARY_PRESETS = [50000, 60000, 70000, 80000, 90000, 100000];
+const SOURCE_COLORS: Record<string, string> = {
+  Adzuna: "#7b2cbf",
+  JSearch: "#1d4ed8",
+  Greenhouse: "#0f766e",
+  Lever: "#b45309",
+  Ashby: "#be185d",
+  Remotive: "#dc2626",
+  RemoteOK: "#0891b2",
+};
 
 function initials(s: string) { return (s || "").split(/\s+/).slice(0, 2).map((w) => w[0]).join("").toUpperCase(); }
 function stringToColor(s: string) {
@@ -27,7 +36,7 @@ function timeAgo(iso: string) {
   if (isNaN(+d)) return "";
   const days = Math.floor((Date.now() - d.getTime()) / 86400000);
   if (days <= 0) return "Today";
-  if (days === 1) return "1d ago";
+  if (days === 1) return "Yesterday";
   if (days < 30) return `${days}d ago`;
   if (days < 365) return `${Math.floor(days / 30)}mo ago`;
   return `${Math.floor(days / 365)}y ago`;
@@ -35,6 +44,7 @@ function timeAgo(iso: string) {
 
 export default function JobSearchView({ onTracked }: { onTracked: () => void }) {
   const [minSalary, setMinSalary] = useState(70000);
+  const [query, setQuery] = useState("");
   const [jobs, setJobs] = useState<Job[]>([]);
   const [total, setTotal] = useState(0);
   const [bySource, setBySource] = useState<Record<string, number>>({});
@@ -42,7 +52,8 @@ export default function JobSearchView({ onTracked }: { onTracked: () => void }) 
   const [tracked, setTracked] = useState<Set<string>>(new Set());
   const [error, setError] = useState("");
   const [page, setPage] = useState(1);
-  const PAGE_SIZE = 60;
+  const [sortBy, setSortBy] = useState<"newest" | "salary">("newest");
+  const PAGE_SIZE = 25;
 
   async function search(targetSalary = minSalary) {
     setLoading(true); setError(""); setPage(1);
@@ -81,91 +92,156 @@ export default function JobSearchView({ onTracked }: { onTracked: () => void }) 
       if (!res.ok) throw new Error("Track failed");
       setTracked((s) => new Set([...s, job.id]));
       onTracked();
-    } catch (e) {
+    } catch {
       alert("Couldn't track this job.");
     }
   }
 
-  const paged = jobs.slice(0, page * PAGE_SIZE);
-  const hasMore = paged.length < jobs.length;
+  function parseSalary(s: string): number {
+    const m = s.match(/\$?(\d+)k/i);
+    return m ? Number(m[1]) * 1000 : 0;
+  }
+
+  const filtered = useMemo(() => {
+    let rows = jobs.slice();
+    if (query) {
+      const q = query.toLowerCase();
+      rows = rows.filter((j) =>
+        j.title.toLowerCase().includes(q) ||
+        j.company.toLowerCase().includes(q) ||
+        j.location.toLowerCase().includes(q)
+      );
+    }
+    if (sortBy === "salary") {
+      rows.sort((a, b) => parseSalary(b.salary) - parseSalary(a.salary));
+    }
+    return rows;
+  }, [jobs, query, sortBy]);
+
+  const paged = filtered.slice(0, page * PAGE_SIZE);
+  const hasMore = paged.length < filtered.length;
 
   return (
-    <section className="view">
-      <header className="topbar">
-        <div className="topbar-left">
-          <h1 className="page-title">Job Search</h1>
-          <p className="page-sub">Live SDR &amp; BDR roles aggregated from Remotive, RemoteOK, Adzuna, JSearch, and 100+ company career pages.</p>
+    <section className="view jobs-view">
+      <header className="jobs-hero">
+        <div>
+          <h1 className="page-title">SDR &amp; BDR Jobs</h1>
+          <p className="page-sub">Live roles aggregated from Adzuna, JSearch, Remotive, RemoteOK, and 100+ company career pages.</p>
+        </div>
+        <div className="jobs-hero-stats">
+          <div className="hero-stat">
+            <div className="hero-stat-value">{total.toLocaleString()}</div>
+            <div className="hero-stat-label">Total openings</div>
+          </div>
         </div>
       </header>
 
-      <section className="panel">
-        <div className="panel-header"><strong>Filter</strong><span className="muted">SDR &amp; BDR titles only</span></div>
-        <div className="search-builder">
-          <div className="sb-grid" style={{ gridTemplateColumns: "1fr" }}>
-            <label className="sb-field">
-              <span>Minimum base salary (USD)</span>
-              <input type="number" step={5000} value={minSalary} onChange={(e) => setMinSalary(Number(e.target.value))} />
-            </label>
-          </div>
-          <div className="sb-presets">
-            <span className="muted">Quick set:</span>
-            {SALARY_PRESETS.map((s) => (
-              <button key={s} className="chip" onClick={() => { setMinSalary(s); search(s); }}>${(s/1000)}k+</button>
-            ))}
-            <button className="btn btn-primary" onClick={() => search()} disabled={loading} style={{ marginLeft: "auto" }}>
-              {loading ? "Searching..." : "🔍 Search"}
-            </button>
-          </div>
+      {Object.keys(bySource).length > 0 && (
+        <div className="source-bar">
+          {Object.entries(bySource).sort((a, b) => b[1] - a[1]).map(([k, v]) => (
+            <div key={k} className="source-chip" style={{ borderColor: SOURCE_COLORS[k] || "#999", color: SOURCE_COLORS[k] || "#333" }}>
+              <span className="source-dot" style={{ background: SOURCE_COLORS[k] || "#999" }} />
+              <strong>{k}</strong>
+              <span className="source-count">{v}</span>
+            </div>
+          ))}
         </div>
-      </section>
+      )}
 
-      <section className="panel" style={{ marginTop: 18 }}>
-        <div className="panel-header">
-          <strong>SDR / BDR jobs <span className="muted" style={{ fontWeight: 400 }}>({total} total · showing {paged.length})</span></strong>
-          <span className="muted">
-            {Object.keys(bySource).length === 0 ? "—" : Object.entries(bySource).map(([k, v]) => `${k}: ${v}`).join(" · ")}
-          </span>
+      <div className="jobs-filterbar">
+        <div className="filter-search">
+          <span className="search-icon">🔍</span>
+          <input
+            type="text"
+            placeholder="Search by company, title, or location..."
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+          />
         </div>
-        {error && <div className="empty" style={{ color: "var(--danger)" }}>{error}</div>}
-        {!error && (
-          <>
-            <div className="jobs-grid">
-              {loading ? (
-                <div className="empty">Searching across all sources...</div>
-              ) : paged.length === 0 ? (
-                <div className="empty">No jobs found. Try lowering the salary, or add Adzuna / JSearch API keys in Vercel for many more sources (see SETUP.md).</div>
-              ) : paged.map((j) => (
-                <div key={j.id} className="job-card">
-                  <div className="job-head">
-                    <div className="company-logo" style={{ background: stringToColor(j.company) }}>{initials(j.company)}</div>
-                    <div className="job-headtext">
-                      <div className="job-title">{j.title}</div>
-                      <div className="job-company">{j.company}</div>
-                    </div>
-                    <span className="job-source">{j.source}</span>
+        <div className="filter-salary">
+          <span className="filter-label">Min salary</span>
+          <div className="filter-salary-chips">
+            {SALARY_PRESETS.map((s) => (
+              <button
+                key={s}
+                className={`chip ${minSalary === s ? "chip-active" : ""}`}
+                onClick={() => { setMinSalary(s); search(s); }}
+              >
+                ${(s / 1000)}k+
+              </button>
+            ))}
+          </div>
+        </div>
+        <div className="filter-sort">
+          <select value={sortBy} onChange={(e) => setSortBy(e.target.value as any)} className="select">
+            <option value="newest">Newest</option>
+            <option value="salary">Highest salary</option>
+          </select>
+          <button className="btn btn-primary" onClick={() => search()} disabled={loading}>
+            {loading ? "…" : "Refresh"}
+          </button>
+        </div>
+      </div>
+
+      {error && <div className="alert alert-error">{error}</div>}
+
+      {loading && jobs.length === 0 ? (
+        <div className="jobs-skeleton">
+          {Array.from({ length: 6 }).map((_, i) => (
+            <div key={i} className="skeleton-row"><div className="skel skel-circle" /><div className="skel-col"><div className="skel skel-line" style={{ width: "60%" }} /><div className="skel skel-line" style={{ width: "40%" }} /></div></div>
+          ))}
+        </div>
+      ) : paged.length === 0 ? (
+        <div className="jobs-empty">
+          <div className="jobs-empty-icon">🔍</div>
+          <h3>No jobs match your filters</h3>
+          <p className="muted">Try lowering the salary minimum or clearing the search.</p>
+        </div>
+      ) : (
+        <>
+          <div className="jobs-count-bar">
+            <strong>{filtered.length.toLocaleString()}</strong> jobs match · <span className="muted">showing {paged.length}</span>
+          </div>
+          <ul className="jobs-list">
+            {paged.map((j) => (
+              <li key={j.id} className="job-row">
+                <a className="job-row-logo" href={j.url} target="_blank" rel="noopener" style={{ background: stringToColor(j.company) }}>
+                  {initials(j.company)}
+                </a>
+                <div className="job-row-main">
+                  <div className="job-row-titleline">
+                    <a className="job-row-title" href={j.url} target="_blank" rel="noopener">{j.title}</a>
+                    <span className="job-row-source" style={{ color: SOURCE_COLORS[j.source] || "#666", borderColor: SOURCE_COLORS[j.source] || "#ccc" }}>{j.source}</span>
                   </div>
-                  <div className="job-meta">
-                    {j.location && <span>📍 {j.location}</span>}
-                    {j.salary && <span>💵 {j.salary}</span>}
-                    {j.posted && <span>📅 {timeAgo(j.posted)}</span>}
-                  </div>
-                  <div className="job-actions">
-                    <a className="btn btn-ghost" href={j.url} target="_blank" rel="noopener">View / Apply</a>
-                    <button className="btn btn-primary" disabled={tracked.has(j.id)} onClick={() => track(j)}>
-                      {tracked.has(j.id) ? "✓ Tracked" : "+ Track"}
-                    </button>
+                  <div className="job-row-company">{j.company}</div>
+                  <div className="job-row-meta">
+                    {j.location && <span className="meta-item"><span className="meta-icon">📍</span>{j.location}</span>}
+                    {j.salary && <span className="meta-item meta-salary"><span className="meta-icon">💵</span>{j.salary}</span>}
+                    {j.posted && <span className="meta-item meta-time"><span className="meta-icon">🕒</span>{timeAgo(j.posted)}</span>}
                   </div>
                 </div>
-              ))}
+                <div className="job-row-actions">
+                  <a className="btn btn-ghost" href={j.url} target="_blank" rel="noopener">Apply</a>
+                  <button
+                    className={`btn ${tracked.has(j.id) ? "btn-tracked" : "btn-primary"}`}
+                    disabled={tracked.has(j.id)}
+                    onClick={() => track(j)}
+                  >
+                    {tracked.has(j.id) ? "✓ Tracked" : "+ Track"}
+                  </button>
+                </div>
+              </li>
+            ))}
+          </ul>
+          {hasMore && (
+            <div className="jobs-load-more">
+              <button className="btn btn-ghost" onClick={() => setPage(page + 1)}>
+                Show {Math.min(PAGE_SIZE, filtered.length - paged.length)} more ({filtered.length - paged.length} remaining)
+              </button>
             </div>
-            {hasMore && (
-              <div style={{ padding: "16px 20px", textAlign: "center", borderTop: "1px solid var(--border)" }}>
-                <button className="btn btn-ghost" onClick={() => setPage(page + 1)}>Show more ({jobs.length - paged.length} remaining)</button>
-              </div>
-            )}
-          </>
-        )}
-      </section>
+          )}
+        </>
+      )}
     </section>
   );
 }
