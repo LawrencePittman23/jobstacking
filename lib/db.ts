@@ -3,6 +3,7 @@ import type { Application, Status, User } from "./types";
 
 let initialized = false;
 let profileInitialized = false;
+let jobsCacheInitialized = false;
 
 export async function ensureSchema() {
   if (initialized) return;
@@ -53,6 +54,46 @@ export async function ensureProfileSchema() {
     )
   `;
   profileInitialized = true;
+}
+
+export async function ensureJobsCacheSchema() {
+  if (jobsCacheInitialized) return;
+  await sql`
+    CREATE TABLE IF NOT EXISTS jobs_cache (
+      key         text PRIMARY KEY,
+      payload     jsonb NOT NULL,
+      fetched_at  timestamptz NOT NULL DEFAULT now()
+    )
+  `;
+  jobsCacheInitialized = true;
+}
+
+export interface JobsCacheEntry {
+  payload: any;
+  fetched_at: string;
+  age_minutes: number;
+}
+
+export async function getJobsCache(key: string): Promise<JobsCacheEntry | null> {
+  await ensureJobsCacheSchema();
+  const { rows } = await sql<{ payload: any; fetched_at: string; age_minutes: number }>`
+    SELECT payload,
+           fetched_at,
+           EXTRACT(EPOCH FROM (now() - fetched_at)) / 60 AS age_minutes
+    FROM jobs_cache WHERE key = ${key}
+  `;
+  return rows[0] ?? null;
+}
+
+export async function setJobsCache(key: string, payload: any) {
+  await ensureJobsCacheSchema();
+  await sql`
+    INSERT INTO jobs_cache (key, payload, fetched_at)
+    VALUES (${key}, ${JSON.stringify(payload)}::jsonb, now())
+    ON CONFLICT (key) DO UPDATE SET
+      payload    = EXCLUDED.payload,
+      fetched_at = now()
+  `;
 }
 
 export interface Profile {
