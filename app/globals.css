@@ -147,7 +147,7 @@ button{font-family:inherit}
 .meta-salary{color:var(--success);font-weight:700}
 .meta-time{color:var(--text-muted)}
 .job-row-actions{display:flex;gap:8px;flex-shrink:0}
-.job-row-actions .btn{padding:9px 16px;font-size:13px;min-width:88px}
+.job-row-actions .btn{padding:9px 14px;font-size:13px;min-width:80px}
 .jobs-load-more{display:flex;justify-content:center;padding:8px}
 .jobs-load-more .btn{padding:11px 22px;font-size:13px}
 .jobs-empty{text-align:center;padding:60px 20px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius)}
@@ -170,6 +170,42 @@ button{font-family:inherit}
 .cover-loading{padding:60px 20px;text-align:center;display:flex;flex-direction:column;align-items:center;gap:16px}
 .cover-spinner{width:36px;height:36px;border:3px solid var(--border);border-top-color:var(--primary);border-radius:50%;animation:spin 0.8s linear infinite}
 @keyframes spin{to{transform:rotate(360deg)}}
+
+/* === Resume Modal === */
+.resume-card{max-width:820px;max-height:92vh;display:flex;flex-direction:column}
+.resume-body{overflow-y:auto;flex:1;background:#f3f4f8;padding:20px}
+.resume-printable{background:#fff;max-width:780px;margin:0 auto;padding:48px 56px;font-family:Georgia,"Times New Roman",serif;color:#1a1a1a;line-height:1.45;font-size:11pt;box-shadow:0 4px 20px rgba(0,0,0,.08);border-radius:4px}
+.r-header{text-align:center;border-bottom:2px solid #1a1a1a;padding-bottom:12px;margin-bottom:16px}
+.r-name{font-size:24pt;font-weight:800;margin:0 0 6px;letter-spacing:-.01em;color:#1a1a1a;text-transform:uppercase}
+.r-contact{font-size:10pt;color:#444}
+.r-section{margin-top:14px}
+.r-section-title{font-size:11pt;font-weight:800;text-transform:uppercase;letter-spacing:.08em;margin:0 0 8px;padding-bottom:2px;border-bottom:1px solid #888;color:#1a1a1a}
+.r-summary{margin:0;font-size:10.5pt;line-height:1.5}
+.r-exp{margin-bottom:12px}
+.r-exp-head{display:flex;justify-content:space-between;align-items:baseline;gap:12px;margin-bottom:4px}
+.r-exp-title{font-weight:700;font-size:11pt;color:#1a1a1a}
+.r-exp-company{font-weight:600;color:#1a1a1a}
+.r-exp-meta{font-size:9.5pt;color:#555;font-style:italic;white-space:nowrap}
+.r-bullets{margin:0;padding-left:18px;font-size:10.5pt}
+.r-bullets li{margin-bottom:3px;line-height:1.45}
+.r-skills{font-size:10.5pt}
+.r-edu{margin-bottom:8px}
+.r-edu-head{display:flex;justify-content:space-between;flex-wrap:wrap;font-size:10.5pt}
+.r-edu-degree{font-weight:700;color:#1a1a1a}
+.r-edu-school{color:#1a1a1a}
+.r-edu-dates{color:#555;font-style:italic;margin-left:auto;white-space:nowrap}
+.r-edu-details{font-size:10pt;color:#555;margin-top:2px}
+
+/* Print: hide everything except the resume */
+@media print {
+  body.printing-resume > *{display:none!important}
+  body.printing-resume .modal.resume-modal{display:block!important;position:static!important;background:#fff!important;padding:0!important}
+  body.printing-resume .modal.resume-modal .modal-card{box-shadow:none!important;max-width:none!important;border-radius:0!important;max-height:none!important;display:block!important}
+  body.printing-resume .modal.resume-modal .no-print{display:none!important}
+  body.printing-resume .resume-body{background:#fff!important;padding:0!important;overflow:visible!important}
+  body.printing-resume .resume-printable{box-shadow:none!important;margin:0!important;padding:32px 40px!important;max-width:none!important;border-radius:0!important}
+  @page{margin:0.5in;size:letter}
+}
 
 /* === Profile Form === */
 .profile-form{padding:18px 20px;display:grid;gap:16px}
@@ -238,6 +274,6 @@ button{font-family:inherit}
 .small{font-size:12px}
 
 @media (max-width:1100px){.stats{grid-template-columns:repeat(3,1fr)}.search input{width:200px}.jobs-filterbar{grid-template-columns:1fr;gap:10px}.filter-salary{justify-content:space-between}}
-@media (max-width:900px){.job-row{grid-template-columns:48px 1fr;gap:14px;padding:14px 16px}.job-row-logo{width:48px;height:48px;font-size:15px}.job-row-actions{grid-column:1/-1;justify-content:flex-end}.jobs-hero{flex-direction:column;gap:14px}.hero-stat{align-self:stretch}}
-@media (max-width:800px){.app{grid-template-columns:1fr}.sidebar{position:relative;height:auto;flex-direction:row;flex-wrap:wrap;padding:12px}.nav{flex-direction:row;flex-wrap:wrap;flex:1 1 100%}.nav-item{flex:1;min-width:120px}.sidebar-footer{flex-basis:100%;border-top:none;padding-top:0}.main{padding:20px}.stats{grid-template-columns:repeat(2,1fr)}.topbar{flex-direction:column}.search input{width:100%}.calendar{grid-template-columns:1fr}.cal-day{min-height:auto}.today-list li{grid-template-columns:70px 1fr}.funnel-row{grid-template-columns:80px 1fr 30px}}
+@media (max-width:900px){.job-row{grid-template-columns:48px 1fr;gap:14px;padding:14px 16px}.job-row-logo{width:48px;height:48px;font-size:15px}.job-row-actions{grid-column:1/-1;justify-content:flex-end;flex-wrap:wrap}.jobs-hero{flex-direction:column;gap:14px}.hero-stat{align-self:stretch}}
+@media (max-width:800px){.app{grid-template-columns:1fr}.sidebar{position:relative;height:auto;flex-direction:row;flex-wrap:wrap;padding:12px}.nav{flex-direction:row;flex-wrap:wrap;flex:1 1 100%}.nav-item{flex:1;min-width:120px}.sidebar-footer{flex-basis:100%;border-top:none;padding-top:0}.main{padding:20px}.stats{grid-template-columns:repeat(2,1fr)}.topbar{flex-direction:column}.search input{width:100%}.calendar{grid-template-columns:1fr}.cal-day{min-height:auto}.today-list li{grid-template-columns:70px 1fr}.funnel-row{grid-template-columns:80px 1fr 30px}.resume-printable{padding:32px 28px}}
 @media (max-width:500px){.stats{grid-template-columns:1fr}.job-row-meta{gap:8px}.filter-salary-chips{flex:1}}
