@@ -15,13 +15,26 @@ function matchesSdrBdr(title: string, extra: string = ""): boolean {
   return SDR_BDR_RE.test(title) || SDR_BDR_RE.test(extra);
 }
 
+async function timedFetch(url: string, init: RequestInit & { next?: any } = {}, timeoutMs = 4000): Promise<Response | null> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(url, { ...init, signal: controller.signal });
+    return res;
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 async function fetchRemotive(): Promise<Job[]> {
   try {
     const queries = ["SDR", "BDR", "sales development", "business development representative"];
     const all: Job[] = [];
     for (const q of queries) {
-      const res = await fetch(`https://remotive.com/api/remote-jobs?search=${encodeURIComponent(q)}`, { next: { revalidate: 1800 } });
-      if (!res.ok) continue;
+      const res = await timedFetch(`https://remotive.com/api/remote-jobs?search=${encodeURIComponent(q)}`, { next: { revalidate: 1800 } } as any, 4000);
+      if (!res || !res.ok) continue;
       const data: any = await res.json();
       for (const j of data.jobs || []) {
         const tagStr = (j.tags || []).join(" ");
@@ -44,11 +57,11 @@ async function fetchRemotive(): Promise<Job[]> {
 
 async function fetchRemoteOK(): Promise<Job[]> {
   try {
-    const res = await fetch("https://remoteok.com/api", {
+    const res = await timedFetch("https://remoteok.com/api", {
       headers: { Accept: "application/json", "User-Agent": "JobStacking/1.0 (https://jobstacking.vercel.app)" },
       next: { revalidate: 1800 },
-    });
-    if (!res.ok) return [];
+    } as any, 4000);
+    if (!res || !res.ok) return [];
     const data: any = await res.json();
     const items = Array.isArray(data) ? data.slice(1) : [];
     return items
@@ -74,10 +87,10 @@ async function fetchAdzuna(minSalary: number): Promise<Job[]> {
     const queries = ["sales development representative", "business development representative", "SDR", "BDR"];
     const all: Job[] = [];
     for (const q of queries) {
-      for (let page = 1; page <= 5; page++) {
+      for (let page = 1; page <= 3; page++) {
         const url = `https://api.adzuna.com/v1/api/jobs/us/search/${page}?app_id=${appId}&app_key=${apiKey}&what=${encodeURIComponent(q)}&results_per_page=50${minSalary > 0 ? `&salary_min=${minSalary}` : ""}`;
-        const res = await fetch(url, { next: { revalidate: 1800 } });
-        if (!res.ok) break;
+        const res = await timedFetch(url, { next: { revalidate: 1800 } } as any, 4000);
+        if (!res || !res.ok) break;
         const data: any = await res.json();
         const results = data.results || [];
         if (results.length === 0) break;
@@ -105,16 +118,16 @@ async function fetchJSearch(minSalary: number): Promise<Job[]> {
   const apiKey = process.env.RAPIDAPI_KEY;
   if (!apiKey) return [];
   try {
-    const queries = ["Sales Development Representative", "Business Development Representative", "SDR remote", "BDR remote"];
+    const queries = ["Sales Development Representative", "Business Development Representative"];
     const all: Job[] = [];
     for (const q of queries) {
-      for (let page = 1; page <= 3; page++) {
+      for (let page = 1; page <= 2; page++) {
         const url = `https://jsearch.p.rapidapi.com/search?query=${encodeURIComponent(q)}&page=${page}&num_pages=1&date_posted=month`;
-        const res = await fetch(url, {
+        const res = await timedFetch(url, {
           headers: { "X-RapidAPI-Key": apiKey, "X-RapidAPI-Host": "jsearch.p.rapidapi.com" },
           next: { revalidate: 1800 },
-        });
-        if (!res.ok) break;
+        } as any, 5000);
+        if (!res || !res.ok) break;
         const data: any = await res.json();
         const items = data.data || [];
         if (items.length === 0) break;
@@ -146,20 +159,20 @@ const GREENHOUSE_COMPANIES = [
   "amplitude","intercom","front","mixpanel","lattice","sentry","posthog","outreach","salesloft",
   "apollo","clari","zendesk","klaviyo","drift","looker","hashicorp","circleci","atlassian",
   "auth0","okta","hubspot","chime","sofi","affirm","toast","squarespace","box","dropbox",
-  "asana","smartsheet","miro","loom","qualtrics","new-relic","pagerduty","freshworks","zoominfo",
+  "smartsheet","miro","loom","qualtrics","new-relic","pagerduty","freshworks","zoominfo",
   "6sense","chilipiper","gemshq","orum","dialpad","aircall","talkdesk","five9","nextiva",
 ];
 
 const LEVER_COMPANIES = [
-  "netflix","github","eventbrite","attentive","mercari","cruise","substack","scale",
-  "shopify","square","reddit","twitch","linkedin","snap","pinterest","yelp","glassdoor",
-  "benchling","clever","discord","plaid","chime","ramp","linear","vercel",
+  "netflix","github","eventbrite","attentive","mercari","cruise","substack",
+  "shopify","square","reddit","twitch","snap","pinterest","yelp","glassdoor",
+  "benchling","clever","discord",
 ];
 
 const ASHBY_COMPANIES = [
   "linear","vercel","supabase","anthropic","neon","posthog","modal","cursor","openai",
   "huggingface","groq","mistral","perplexity","arc","raycast","cohere","deepgram",
-  "airplane","replicate","runway","weights-and-biases","pinecone","langchain","replit",
+  "airplane","replicate","runway","pinecone","langchain","replit",
 ];
 
 async function fetchAtsCompany(slug: string, source: "Greenhouse" | "Lever" | "Ashby"): Promise<Job[]> {
@@ -169,8 +182,8 @@ async function fetchAtsCompany(slug: string, source: "Greenhouse" | "Lever" | "A
     Ashby:      `https://api.ashbyhq.com/posting-api/job-board/${slug}`,
   };
   try {
-    const res = await fetch(urls[source], { next: { revalidate: 1800 } });
-    if (!res.ok) return [];
+    const res = await timedFetch(urls[source], { next: { revalidate: 1800 } } as any, 3000);
+    if (!res || !res.ok) return [];
     const data: any = await res.json();
     if (source === "Greenhouse") {
       return (data.jobs || []).filter((j: any) => matchesSdrBdr(j.title || "")).map((j: any) => ({
@@ -222,7 +235,13 @@ async function fetchATS(): Promise<Job[]> {
     ...LEVER_COMPANIES.map((c) => fetchAtsCompany(c, "Lever")),
     ...ASHBY_COMPANIES.map((c) => fetchAtsCompany(c, "Ashby")),
   ];
-  const results = await Promise.allSettled(tasks);
+  // Race the whole batch against a 7s wall-clock to leave headroom under Hobby 10s limit
+  const results = await Promise.race([
+    Promise.allSettled(tasks),
+    new Promise<PromiseSettledResult<Job[]>[]>((resolve) =>
+      setTimeout(() => resolve(tasks.map(() => ({ status: "rejected", reason: "timeout" } as any))), 7000)
+    ),
+  ]);
   return results.flatMap((r) => (r.status === "fulfilled" ? r.value : []));
 }
 
