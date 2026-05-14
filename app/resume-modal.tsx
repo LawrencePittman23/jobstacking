@@ -74,12 +74,7 @@ export default function ResumeModal({
     }
     setApplying(true);
     try {
-      // Trigger the print dialog so user can save the PDF
-      downloadPDF();
-      // Small delay so the print dialog isn't blocked by the new-tab open
-      setTimeout(() => {
-        window.open(job.url, "_blank", "noopener,noreferrer");
-      }, 300);
+      window.open(job.url, "_blank", "noopener,noreferrer");
       await fetch("/api/applications", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -90,11 +85,11 @@ export default function ResumeModal({
           applied_at: new Date().toISOString().slice(0, 10),
           source: "Apply Flow",
           link: job.url,
-          notes: "Tailored resume generated; PDF print dialog opened.",
+          notes: "Tailored resume generated.",
         }),
       });
       if (onApplied) onApplied();
-      setTimeout(() => onClose(), 1500);
+      setTimeout(() => onClose(), 800);
     } catch {
       alert("Couldn't log the application. The job page opened anyway.");
     } finally {
