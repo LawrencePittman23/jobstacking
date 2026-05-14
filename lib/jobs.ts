@@ -15,6 +15,26 @@ function matchesSdrBdr(title: string, extra: string = ""): boolean {
   return SDR_BDR_RE.test(title) || SDR_BDR_RE.test(extra);
 }
 
+const REMOTE_RE = /\b(remote|anywhere|worldwide|work\s*from\s*home|wfh|fully\s+remote|distributed)\b/i;
+const HYBRID_RE = /\bhybrid\b/i;
+const ONSITE_RE = /\bon[-\s]?site|in[-\s]?office\b/i;
+
+function isRemoteJob(j: Job): boolean {
+  // Sources that are remote-only by definition
+  if (j.source === "Remotive" || j.source === "RemoteOK") return true;
+
+  const loc = (j.location || "").toLowerCase();
+  const title = (j.title || "").toLowerCase();
+
+  // Exclude obvious hybrid / onsite
+  if (HYBRID_RE.test(loc) || ONSITE_RE.test(loc)) return false;
+
+  // Include if title or location says remote / anywhere / WFH
+  if (REMOTE_RE.test(loc) || REMOTE_RE.test(title)) return true;
+
+  return false;
+}
+
 async function timedFetch(url: string, init: RequestInit & { next?: any } = {}, timeoutMs = 4000): Promise<Response | null> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -84,7 +104,8 @@ async function fetchAdzuna(minSalary: number): Promise<Job[]> {
   const apiKey = process.env.ADZUNA_API_KEY;
   if (!appId || !apiKey) return [];
   try {
-    const queries = ["sales development representative", "business development representative", "SDR", "BDR"];
+    // "remote" added to each Adzuna query to bias upstream results toward remote
+    const queries = ["remote sales development representative", "remote business development representative", "remote SDR", "remote BDR"];
     const all: Job[] = [];
     for (const q of queries) {
       for (let page = 1; page <= 3; page++) {
@@ -122,7 +143,8 @@ async function fetchJSearch(minSalary: number): Promise<Job[]> {
     const all: Job[] = [];
     for (const q of queries) {
       for (let page = 1; page <= 2; page++) {
-        const url = `https://jsearch.p.rapidapi.com/search?query=${encodeURIComponent(q)}&page=${page}&num_pages=1&date_posted=month`;
+        // remote_jobs_only=true to filter at the API level
+        const url = `https://jsearch.p.rapidapi.com/search?query=${encodeURIComponent(q)}&page=${page}&num_pages=1&date_posted=month&remote_jobs_only=true`;
         const res = await timedFetch(url, {
           headers: { "X-RapidAPI-Key": apiKey, "X-RapidAPI-Host": "jsearch.p.rapidapi.com" },
           next: { revalidate: 1800 },
@@ -139,7 +161,7 @@ async function fetchJSearch(minSalary: number): Promise<Job[]> {
             id: `jsearch-${j.job_id}`,
             title: j.job_title || "",
             company: j.employer_name || "",
-            location: [j.job_city, j.job_state, j.job_country].filter(Boolean).join(", ") || (j.job_is_remote ? "Remote" : ""),
+            location: j.job_is_remote ? "Remote" : [j.job_city, j.job_state, j.job_country].filter(Boolean).join(", "),
             salary: sMin ? `$${Math.floor(sMin / 1000)}k${j.job_max_salary ? `-$${Math.floor(j.job_max_salary / 1000)}k` : ""}` : "",
             url: j.job_apply_link || j.job_google_link || "",
             source: "JSearch",
@@ -235,7 +257,6 @@ async function fetchATS(): Promise<Job[]> {
     ...LEVER_COMPANIES.map((c) => fetchAtsCompany(c, "Lever")),
     ...ASHBY_COMPANIES.map((c) => fetchAtsCompany(c, "Ashby")),
   ];
-  // Race the whole batch against a 7s wall-clock to leave headroom under Hobby 10s limit
   const results = await Promise.race([
     Promise.allSettled(tasks),
     new Promise<PromiseSettledResult<Job[]>[]>((resolve) =>
@@ -262,9 +283,12 @@ export async function fetchAllSdrBdrJobs(minSalary: number = 0): Promise<{ jobs:
     ...(ats.status === "fulfilled" ? ats.value : []),
   ];
 
+  // Remote-only filter: applied AFTER aggregation, BEFORE dedup/salary filter
+  const remoteOnly = all.filter(isRemoteJob);
+
   const seen = new Set<string>();
   const deduped: Job[] = [];
-  for (const j of all) {
+  for (const j of remoteOnly) {
     const k = `${j.company.toLowerCase().trim()}|${j.title.toLowerCase().trim().replace(/[^a-z0-9]/g, "")}`;
     if (seen.has(k)) continue;
     seen.add(k);
