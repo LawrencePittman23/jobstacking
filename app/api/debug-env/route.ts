@@ -13,6 +13,7 @@ export async function GET() {
     has_adzuna_app_id: !!process.env.ADZUNA_APP_ID,
     has_adzuna_api_key: !!process.env.ADZUNA_API_KEY,
     has_rapidapi_key: !!process.env.RAPIDAPI_KEY,
+    has_anthropic_api_key: !!process.env.ANTHROPIC_API_KEY,
     vercel_env: process.env.VERCEL_ENV,
   });
 }
