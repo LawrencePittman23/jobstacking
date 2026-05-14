@@ -11,19 +11,20 @@ export interface CoverLetterJob {
 export default function CoverLetterModal({
   job,
   onClose,
+  onApplied,
 }: {
   job: CoverLetterJob;
   onClose: () => void;
+  onApplied?: () => void;
 }) {
   const [text, setText] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [copied, setCopied] = useState(false);
+  const [applying, setApplying] = useState(false);
 
   async function generate() {
-    setLoading(true);
-    setError("");
-    setText("");
+    setLoading(true); setError(""); setText("");
     try {
       const res = await fetch("/api/cover-letter", {
         method: "POST",
@@ -45,10 +46,7 @@ export default function CoverLetterModal({
     }
   }
 
-  useEffect(() => {
-    generate();
-    /* eslint-disable-next-line */
-  }, []);
+  useEffect(() => { generate(); /* eslint-disable-next-line */ }, []);
 
   async function copy() {
     try {
@@ -56,7 +54,38 @@ export default function CoverLetterModal({
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     } catch {
-      alert("Couldn't copy to clipboard. Select and copy manually.");
+      alert("Couldn't copy. Select and copy manually.");
+    }
+  }
+
+  async function applyNow() {
+    if (!job.url) {
+      alert("This job has no application URL.");
+      return;
+    }
+    setApplying(true);
+    try {
+      try { await navigator.clipboard.writeText(text); } catch {}
+      window.open(job.url, "_blank", "noopener,noreferrer");
+      await fetch("/api/applications", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          company: job.company,
+          role: job.title,
+          status: "applied",
+          applied_at: new Date().toISOString().slice(0, 10),
+          source: "Apply Flow",
+          link: job.url,
+          notes: "Cover letter generated and copied to clipboard.",
+        }),
+      });
+      if (onApplied) onApplied();
+      setTimeout(() => onClose(), 1200);
+    } catch (e: any) {
+      alert("Couldn't log the application. The job page opened anyway.");
+    } finally {
+      setApplying(false);
     }
   }
 
@@ -66,9 +95,7 @@ export default function CoverLetterModal({
         <div className="modal-header">
           <div>
             <h2 style={{ marginBottom: 4 }}>Cover Letter ✨</h2>
-            <div className="muted" style={{ fontSize: 13 }}>
-              {job.title} · {job.company}
-            </div>
+            <div className="muted" style={{ fontSize: 13 }}>{job.title} · {job.company}</div>
           </div>
           <button className="icon-btn" onClick={onClose}>✕</button>
         </div>
@@ -84,12 +111,12 @@ export default function CoverLetterModal({
               {error}
               {error.includes("resume") && (
                 <div style={{ marginTop: 8, fontSize: 12 }}>
-                  Go to <strong>Settings → Profile</strong> and paste your resume to enable cover letters.
+                  Go to <strong>Settings → Profile</strong> and paste your resume.
                 </div>
               )}
               {error.includes("ANTHROPIC_API_KEY") && (
                 <div style={{ marginTop: 8, fontSize: 12 }}>
-                  Add your Anthropic API key to Vercel: Settings → Environment Variables → add <code>ANTHROPIC_API_KEY</code>.
+                  Add <code>ANTHROPIC_API_KEY</code> in Vercel → Settings → Environment Variables.
                 </div>
               )}
             </div>
@@ -103,7 +130,7 @@ export default function CoverLetterModal({
               />
               <div className="cover-meta">
                 <span className="muted">{text.split(/\s+/).filter(Boolean).length} words</span>
-                <span className="muted">Edit before copying — always read first</span>
+                <span className="muted">Edit before applying — always read first</span>
               </div>
             </>
           )}
@@ -113,9 +140,14 @@ export default function CoverLetterModal({
           <button className="btn btn-ghost" onClick={generate} disabled={loading}>
             {loading ? "Generating…" : "↻ Regenerate"}
           </button>
-          <button className="btn btn-primary" onClick={copy} disabled={loading || !text}>
+          <button className="btn btn-ghost" onClick={copy} disabled={loading || !text}>
             {copied ? "✓ Copied" : "📋 Copy"}
           </button>
+          {job.url && (
+            <button className="btn btn-primary" onClick={applyNow} disabled={loading || !text || applying}>
+              {applying ? "Opening…" : "🚀 Apply now"}
+            </button>
+          )}
         </div>
       </div>
     </div>

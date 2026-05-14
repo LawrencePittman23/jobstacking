@@ -20,13 +20,16 @@ interface TailoredResume {
 export default function ResumeModal({
   job,
   onClose,
+  onApplied,
 }: {
   job: TailorResumeJob;
   onClose: () => void;
+  onApplied?: () => void;
 }) {
   const [resume, setResume] = useState<TailoredResume | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [applying, setApplying] = useState(false);
 
   async function generate() {
     setLoading(true);
@@ -64,15 +67,48 @@ export default function ResumeModal({
     setTimeout(() => document.body.classList.remove("printing-resume"), 500);
   }
 
+  async function applyNow() {
+    if (!job.url) {
+      alert("This job has no application URL.");
+      return;
+    }
+    setApplying(true);
+    try {
+      // Trigger the print dialog so user can save the PDF
+      downloadPDF();
+      // Small delay so the print dialog isn't blocked by the new-tab open
+      setTimeout(() => {
+        window.open(job.url, "_blank", "noopener,noreferrer");
+      }, 300);
+      await fetch("/api/applications", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          company: job.company,
+          role: job.title,
+          status: "applied",
+          applied_at: new Date().toISOString().slice(0, 10),
+          source: "Apply Flow",
+          link: job.url,
+          notes: "Tailored resume generated; PDF print dialog opened.",
+        }),
+      });
+      if (onApplied) onApplied();
+      setTimeout(() => onClose(), 1500);
+    } catch {
+      alert("Couldn't log the application. The job page opened anyway.");
+    } finally {
+      setApplying(false);
+    }
+  }
+
   return (
     <div className="modal resume-modal" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
       <div className="modal-card resume-card">
         <div className="modal-header no-print">
           <div>
             <h2 style={{ marginBottom: 4 }}>Tailored Resume 📄</h2>
-            <div className="muted" style={{ fontSize: 13 }}>
-              {job.title} · {job.company}
-            </div>
+            <div className="muted" style={{ fontSize: 13 }}>{job.title} · {job.company}</div>
           </div>
           <button className="icon-btn" onClick={onClose}>✕</button>
         </div>
@@ -162,9 +198,14 @@ export default function ResumeModal({
           <button className="btn btn-ghost" onClick={generate} disabled={loading}>
             {loading ? "Generating…" : "↻ Regenerate"}
           </button>
-          <button className="btn btn-primary" onClick={downloadPDF} disabled={loading || !resume}>
+          <button className="btn btn-ghost" onClick={downloadPDF} disabled={loading || !resume}>
             📄 Download PDF
           </button>
+          {job.url && (
+            <button className="btn btn-primary" onClick={applyNow} disabled={loading || !resume || applying}>
+              {applying ? "Opening…" : "🚀 Apply now"}
+            </button>
+          )}
         </div>
       </div>
     </div>
