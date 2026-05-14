@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import CoverLetterModal, { CoverLetterJob } from "./cover-letter-modal";
+import ResumeModal, { TailorResumeJob } from "./resume-modal";
 
 interface Job {
   id: string;
@@ -55,6 +56,7 @@ export default function JobSearchView({ onTracked }: { onTracked: () => void }) 
   const [page, setPage] = useState(1);
   const [sortBy, setSortBy] = useState<"newest" | "salary">("newest");
   const [coverJob, setCoverJob] = useState<CoverLetterJob | null>(null);
+  const [resumeJob, setResumeJob] = useState<TailorResumeJob | null>(null);
   const PAGE_SIZE = 25;
 
   async function search(targetSalary = minSalary) {
@@ -225,6 +227,13 @@ export default function JobSearchView({ onTracked }: { onTracked: () => void }) 
                 <div className="job-row-actions">
                   <button
                     className="btn btn-ghost"
+                    onClick={() => setResumeJob({ title: j.title, company: j.company, url: j.url })}
+                    title="Generate tailored resume PDF"
+                  >
+                    📄 Resume
+                  </button>
+                  <button
+                    className="btn btn-ghost"
                     onClick={() => setCoverJob({ title: j.title, company: j.company, url: j.url })}
                     title="Generate AI cover letter"
                   >
@@ -253,6 +262,7 @@ export default function JobSearchView({ onTracked }: { onTracked: () => void }) 
       )}
 
       {coverJob && <CoverLetterModal job={coverJob} onClose={() => setCoverJob(null)} />}
+      {resumeJob && <ResumeModal job={resumeJob} onClose={() => setResumeJob(null)} />}
     </section>
   );
 }
