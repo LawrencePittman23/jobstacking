@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <link rel="stylesheet" href="popup.css" />
+</head>
+<body>
+  <header class="hd">
+    <div class="logo">JS</div>
+    <div>
+      <h1>JobStacking Autofill</h1>
+      <div class="sub">v0.1</div>
+    </div>
+  </header>
+
+  <p class="hint">Fill once. Click <b>Fill form</b> on any application page (or press <kbd>Alt</kbd>+<kbd>J</kbd>).</p>
+
+  <form id="f" class="form">
+    <fieldset>
+      <legend>Identity</legend>
+      <div class="row">
+        <label>First name<input name="firstName" autocomplete="given-name" /></label>
+        <label>Last name<input name="lastName" autocomplete="family-name" /></label>
+      </div>
+      <label>Email<input name="email" type="email" autocomplete="email" /></label>
+      <label>Phone<input name="phone" type="tel" autocomplete="tel" /></label>
+      <div class="row">
+        <label>City<input name="city" /></label>
+        <label>State<input name="state" /></label>
+      </div>
+      <div class="row">
+        <label>ZIP<input name="postalCode" /></label>
+        <label>Country<input name="country" value="United States" /></label>
+      </div>
+      <label>Street address<input name="street" /></label>
+    </fieldset>
+
+    <fieldset>
+      <legend>Links</legend>
+      <label>LinkedIn URL<input name="linkedin" type="url" placeholder="https://linkedin.com/in/..." /></label>
+      <label>Portfolio / Website<input name="website" type="url" /></label>
+      <label>GitHub<input name="github" type="url" /></label>
+    </fieldset>
+
+    <fieldset>
+      <legend>Work auth</legend>
+      <label>Authorized to work in US?
+        <select name="workAuth"><option>Yes</option><option>No</option></select>
+      </label>
+      <label>Will you require sponsorship?
+        <select name="sponsorship"><option>No</option><option>Yes</option></select>
+      </label>
+      <label>Years of experience<input name="yearsExperience" type="number" /></label>
+    </fieldset>
+
+    <fieldset>
+      <legend>Demographics (EEO — optional)</legend>
+      <label>Gender
+        <select name="gender"><option></option><option>Male</option><option>Female</option><option>Non-binary</option><option>Prefer not to say</option><option>Decline to self-identify</option></select>
+      </label>
+      <label>Race / Ethnicity
+        <select name="race">
+          <option></option>
+          <option>White</option><option>Black or African American</option><option>Hispanic or Latino</option><option>Asian</option><option>Native Hawaiian or Other Pacific Islander</option><option>American Indian or Alaska Native</option><option>Two or More Races</option><option>Prefer not to say</option><option>Decline to self-identify</option>
+        </select>
+      </label>
+      <label>Veteran status
+        <select name="veteran"><option></option><option>I am not a protected veteran</option><option>I am a protected veteran</option><option>Prefer not to say</option><option>Decline to self-identify</option></select>
+      </label>
+      <label>Disability status
+        <select name="disability"><option></option><option>No, I do not have a disability and have not had one in the past</option><option>Yes, I have a disability, or have had one in the past</option><option>I do not want to answer</option></select>
+      </label>
+    </fieldset>
+
+    <fieldset>
+      <legend>Cover letter snippet</legend>
+      <label>Default cover letter / "Why this role" text
+        <textarea name="coverLetter" rows="5" placeholder="Paste a default cover-letter you'd reuse, or leave blank and paste the AI-generated one per application."></textarea>
+      </label>
+    </fieldset>
+
+    <div class="actions">
+      <button type="button" id="fill">✨ Fill form on this page</button>
+      <button type="submit" id="save">Save profile</button>
+    </div>
+    <div id="status" class="status"></div>
+  </form>
+</body>
+<script src="popup.js"></script>
+</html>
