@@ -20,18 +20,11 @@ const HYBRID_RE = /\bhybrid\b/i;
 const ONSITE_RE = /\bon[-\s]?site|in[-\s]?office\b/i;
 
 function isRemoteJob(j: Job): boolean {
-  // Sources that are remote-only by definition
   if (j.source === "Remotive" || j.source === "RemoteOK") return true;
-
   const loc = (j.location || "").toLowerCase();
   const title = (j.title || "").toLowerCase();
-
-  // Exclude obvious hybrid / onsite
   if (HYBRID_RE.test(loc) || ONSITE_RE.test(loc)) return false;
-
-  // Include if title or location says remote / anywhere / WFH
   if (REMOTE_RE.test(loc) || REMOTE_RE.test(title)) return true;
-
   return false;
 }
 
@@ -46,6 +39,31 @@ async function timedFetch(url: string, init: RequestInit & { next?: any } = {}, 
   } finally {
     clearTimeout(timer);
   }
+}
+
+// Normalize JSearch's `job_publisher` to consistent source names so they group
+// cleanly under the source-filter chips on the Job Search view.
+function normalizePublisher(raw: string): string {
+  if (!raw) return "JSearch";
+  const lower = raw.toLowerCase().trim();
+  const compact = lower.replace(/\s+/g, "");
+  if (lower.includes("linkedin"))      return "LinkedIn";
+  if (lower.includes("indeed"))        return "Indeed";
+  if (compact.includes("ziprecruiter")) return "ZipRecruiter";
+  if (lower.includes("glassdoor"))     return "Glassdoor";
+  if (lower.includes("monster"))       return "Monster";
+  if (compact.includes("simplyhired")) return "SimplyHired";
+  if (compact.includes("builtin"))     return "Built In";
+  if (lower.includes("snagajob"))      return "Snagajob";
+  if (lower.includes("jooble"))        return "Jooble";
+  if (lower.includes("talent.com") || lower === "talent") return "Talent.com";
+  if (lower.includes("lensa"))         return "Lensa";
+  if (/^https?:\/\//.test(raw) || raw.includes(".")) {
+    const host = raw.replace(/^https?:\/\//, "").split("/")[0].replace(/^www\./, "");
+    const name = host.split(".")[0];
+    return name.charAt(0).toUpperCase() + name.slice(1);
+  }
+  return raw;
 }
 
 async function fetchRemotive(): Promise<Job[]> {
@@ -104,7 +122,6 @@ async function fetchAdzuna(minSalary: number): Promise<Job[]> {
   const apiKey = process.env.ADZUNA_API_KEY;
   if (!appId || !apiKey) return [];
   try {
-    // "remote" added to each Adzuna query to bias upstream results toward remote
     const queries = ["remote sales development representative", "remote business development representative", "remote SDR", "remote BDR"];
     const all: Job[] = [];
     for (const q of queries) {
@@ -143,7 +160,6 @@ async function fetchJSearch(minSalary: number): Promise<Job[]> {
     const all: Job[] = [];
     for (const q of queries) {
       for (let page = 1; page <= 2; page++) {
-        // remote_jobs_only=true to filter at the API level
         const url = `https://jsearch.p.rapidapi.com/search?query=${encodeURIComponent(q)}&page=${page}&num_pages=1&date_posted=month&remote_jobs_only=true`;
         const res = await timedFetch(url, {
           headers: { "X-RapidAPI-Key": apiKey, "X-RapidAPI-Host": "jsearch.p.rapidapi.com" },
@@ -157,6 +173,9 @@ async function fetchJSearch(minSalary: number): Promise<Job[]> {
           if (!matchesSdrBdr(j.job_title || "")) continue;
           const sMin = j.job_min_salary;
           if (minSalary > 0 && sMin && sMin < minSalary) continue;
+          // Use the underlying publisher (LinkedIn, Indeed, ZipRecruiter, Glassdoor, ...)
+          // as the source so users can filter by board.
+          const source = normalizePublisher(j.job_publisher || "");
           all.push({
             id: `jsearch-${j.job_id}`,
             title: j.job_title || "",
@@ -164,7 +183,7 @@ async function fetchJSearch(minSalary: number): Promise<Job[]> {
             location: j.job_is_remote ? "Remote" : [j.job_city, j.job_state, j.job_country].filter(Boolean).join(", "),
             salary: sMin ? `$${Math.floor(sMin / 1000)}k${j.job_max_salary ? `-$${Math.floor(j.job_max_salary / 1000)}k` : ""}` : "",
             url: j.job_apply_link || j.job_google_link || "",
-            source: "JSearch",
+            source,
             posted: j.job_posted_at_datetime_utc || "",
           });
         }
@@ -283,7 +302,6 @@ export async function fetchAllSdrBdrJobs(minSalary: number = 0): Promise<{ jobs:
     ...(ats.status === "fulfilled" ? ats.value : []),
   ];
 
-  // Remote-only filter: applied AFTER aggregation, BEFORE dedup/salary filter
   const remoteOnly = all.filter(isRemoteJob);
 
   const seen = new Set<string>();

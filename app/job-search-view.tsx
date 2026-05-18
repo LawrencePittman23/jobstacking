@@ -23,6 +23,17 @@ const SOURCE_COLORS: Record<string, string> = {
   Ashby: "#be185d",
   Remotive: "#dc2626",
   RemoteOK: "#0891b2",
+  LinkedIn: "#0a66c2",
+  Indeed: "#003a9b",
+  ZipRecruiter: "#5d7cea",
+  Glassdoor: "#0caa41",
+  Monster: "#6e46ae",
+  SimplyHired: "#2164f3",
+  "Built In": "#f59e0b",
+  Snagajob: "#ef4444",
+  Jooble: "#0ea5e9",
+  "Talent.com": "#10b981",
+  Lensa: "#8b5cf6",
 };
 
 type DatePosted = "all" | "today" | "3days" | "week" | "month";
@@ -165,7 +176,7 @@ export default function JobSearchView({ onTracked }: { onTracked: () => void }) 
       <header className="jobs-hero">
         <div>
           <h1 className="page-title">SDR &amp; BDR Jobs</h1>
-          <p className="page-sub">Live roles aggregated from Adzuna, JSearch, Remotive, RemoteOK, and 100+ company career pages.</p>
+          <p className="page-sub">Live roles aggregated from Indeed, ZipRecruiter, LinkedIn, Glassdoor, Remotive, RemoteOK, and 100+ company career pages.</p>
         </div>
         <div className="jobs-hero-stats">
           <div className="hero-stat">
