@@ -31,16 +31,11 @@ function relativeDate(iso?: string | null) {
 }
 
 type View = "applications" | "search" | "calendar" | "analytics" | "settings";
-type DateRange = "all" | "today" | "week" | "month" | "quarter" | "year" | "custom";
 
 export default function Dashboard({ userEmail, userName }: { userEmail: string; userName: string }) {
   const [apps, setApps] = useState<Application[]>([]);
   const [view, setView] = useState<View>("applications");
   const [filter, setFilter] = useState<Status | "all">("all");
-  const [sourceFilter, setSourceFilter] = useState<string>("all");
-  const [dateRange, setDateRange] = useState<DateRange>("all");
-  const [customFrom, setCustomFrom] = useState<string>("");
-  const [customTo, setCustomTo] = useState<string>("");
   const [query, setQuery] = useState("");
   const [sort, setSort] = useState("date-desc");
   const [calAnchor, setCalAnchor] = useState<Date>(startOfWeek(new Date()));
@@ -57,13 +52,6 @@ export default function Dashboard({ userEmail, userName }: { userEmail: string; 
 
   useEffect(() => { reload(); }, [reload]);
 
-  const sources = useMemo(() => {
-    const set = new Set<string>();
-    for (const a of apps) if (a.source) set.add(a.source);
-    for (const s of KNOWN_SOURCES) set.add(s);
-    return Array.from(set).sort((a, b) => a.localeCompare(b));
-  }, [apps]);
-
   const counts = useMemo(() => {
     const c: Record<string, number> = { all: apps.length };
     for (const r of apps) c[r.status] = (c[r.status] || 0) + 1;
@@ -75,29 +63,9 @@ export default function Dashboard({ userEmail, userName }: { userEmail: string; 
     return apps.filter((a) => (a.status === "interview" || a.status === "assessment") && a.applied_at && new Date(a.applied_at + "T00:00:00") >= today).length;
   }, [apps]);
 
-  const dateBounds = useMemo(() => {
-    const now = new Date(); now.setHours(0,0,0,0);
-    let from: string | null = null;
-    let to: string | null = null;
-    switch (dateRange) {
-      case "today":   from = isoDate(now); break;
-      case "week":    from = isoDate(addDays(now, -6)); break;
-      case "month":   from = isoDate(addDays(now, -29)); break;
-      case "quarter": from = isoDate(addDays(now, -89)); break;
-      case "year":    from = isoDate(new Date(now.getFullYear(), 0, 1)); break;
-      case "custom":  from = customFrom || null; to = customTo || null; break;
-      case "all":
-      default:        from = null; to = null;
-    }
-    return { from, to };
-  }, [dateRange, customFrom, customTo]);
-
   const filtered = useMemo(() => {
     let rows = apps.slice();
     if (filter !== "all") rows = rows.filter((r) => r.status === filter);
-    if (sourceFilter !== "all") rows = rows.filter((r) => (r.source || "").toLowerCase() === sourceFilter.toLowerCase());
-    if (dateBounds.from) rows = rows.filter((r) => r.applied_at && r.applied_at >= dateBounds.from!);
-    if (dateBounds.to)   rows = rows.filter((r) => r.applied_at && r.applied_at <= dateBounds.to!);
     if (query) {
       const q = query.toLowerCase();
       rows = rows.filter((r) => r.company.toLowerCase().includes(q) || r.role.toLowerCase().includes(q) || (r.location || "").toLowerCase().includes(q));
@@ -109,22 +77,7 @@ export default function Dashboard({ userEmail, userName }: { userEmail: string; 
       default:          rows.sort((a,b) => (b.applied_at || "").localeCompare(a.applied_at || ""));
     }
     return rows;
-  }, [apps, filter, sourceFilter, dateBounds, query, sort]);
-
-  const activeFilterCount =
-    (filter !== "all" ? 1 : 0) +
-    (sourceFilter !== "all" ? 1 : 0) +
-    (dateRange !== "all" ? 1 : 0) +
-    (query ? 1 : 0);
-
-  function clearFilters() {
-    setFilter("all");
-    setSourceFilter("all");
-    setDateRange("all");
-    setCustomFrom("");
-    setCustomTo("");
-    setQuery("");
-  }
+  }, [apps, filter, query, sort]);
 
   async function saveApp(form: any) {
     const payload = {
@@ -221,38 +174,14 @@ export default function Dashboard({ userEmail, userName }: { userEmail: string; 
                   ))}
                 </div>
                 <div className="panel-actions">
-                  <select className="select" value={sourceFilter} onChange={(e) => setSourceFilter(e.target.value)} title="Filter by job board">
-                    <option value="all">All sources</option>
-                    {sources.map((s) => <option key={s} value={s}>{s}</option>)}
-                  </select>
-                  <select className="select" value={dateRange} onChange={(e) => setDateRange(e.target.value as DateRange)} title="Filter by date">
-                    <option value="all">All time</option>
-                    <option value="today">Today</option>
-                    <option value="week">Last 7 days</option>
-                    <option value="month">Last 30 days</option>
-                    <option value="quarter">Last 90 days</option>
-                    <option value="year">This year</option>
-                    <option value="custom">Custom range…</option>
-                  </select>
                   <select className="select" value={sort} onChange={(e) => setSort(e.target.value)}>
                     <option value="date-desc">Newest first</option>
                     <option value="date-asc">Oldest first</option>
                     <option value="company">Company A–Z</option>
                     <option value="role">Role A–Z</option>
                   </select>
-                  {activeFilterCount > 0 && (
-                    <button className="btn btn-ghost" onClick={clearFilters} title="Clear all filters">Clear ({activeFilterCount})</button>
-                  )}
                 </div>
               </div>
-
-              {dateRange === "custom" && (
-                <div className="custom-range">
-                  <label>From <input type="date" value={customFrom} onChange={(e) => setCustomFrom(e.target.value)} /></label>
-                  <label>To <input type="date" value={customTo} onChange={(e) => setCustomTo(e.target.value)} /></label>
-                  <span className="muted small">Leave a side blank for open-ended.</span>
-                </div>
-              )}
 
               <div className="table-wrap">
                 <table className="table">
@@ -264,7 +193,7 @@ export default function Dashboard({ userEmail, userName }: { userEmail: string; 
                   </thead>
                   <tbody>
                     {filtered.length === 0 ? (
-                      <tr><td colSpan={6} className="empty">No applications match the current filters. {activeFilterCount > 0 && <button className="link-btn" onClick={clearFilters}>Clear filters</button>}</td></tr>
+                      <tr><td colSpan={6} className="empty">No applications. Try syncing Gmail or adding one manually.</td></tr>
                     ) : filtered.map((r) => (
                       <tr key={r.id}>
                         <td>
@@ -291,7 +220,7 @@ export default function Dashboard({ userEmail, userName }: { userEmail: string; 
                 </table>
               </div>
               <div className="panel-footer">
-                <div className="muted">Showing {filtered.length} of {apps.length} applications{activeFilterCount > 0 ? " · filtered" : ""}</div>
+                <div className="muted">Showing {filtered.length} of {apps.length} applications</div>
               </div>
             </section>
           </section>
