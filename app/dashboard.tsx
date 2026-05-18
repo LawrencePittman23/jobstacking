@@ -4,6 +4,7 @@ import { signOut } from "next-auth/react";
 import type { Application, Status } from "@/lib/types";
 import JobSearchView from "./job-search-view";
 import CoverLetterModal, { CoverLetterJob } from "./cover-letter-modal";
+import TimeLogView, { TimeSession } from "./time-log-view";
 
 const STATUS_LABEL: Record<Status, string> = {
   saved: "Saved", applied: "Applied", interview: "Interview", assessment: "Assessment", offer: "Offer", rejected: "Rejected",
@@ -30,7 +31,7 @@ function relativeDate(iso?: string | null) {
   return `${Math.floor(diff/30)}mo ago`;
 }
 
-type View = "applications" | "search" | "calendar" | "analytics" | "settings";
+type View = "applications" | "search" | "calendar" | "analytics" | "timelog" | "settings";
 type DateRange = "all" | "today" | "week" | "month" | "quarter" | "year" | "custom";
 
 export default function Dashboard({ userEmail, userName }: { userEmail: string; userName: string }) {
@@ -152,6 +153,7 @@ export default function Dashboard({ userEmail, userName }: { userEmail: string; 
           <NavItem name="Job Search" route="search" view={view} setView={setView} icon="🔎" />
           <NavItem name="Calendar" route="calendar" view={view} setView={setView} icon="📅" badge={upcomingCount} badgeAlt />
           <NavItem name="Analytics" route="analytics" view={view} setView={setView} icon="📊" />
+          <NavItem name="Time Log" route="timelog" view={view} setView={setView} icon="⏱️" />
           <NavItem name="Settings" route="settings" view={view} setView={setView} icon="⚙" />
         </nav>
         <div className="sidebar-footer">
@@ -183,7 +185,7 @@ export default function Dashboard({ userEmail, userName }: { userEmail: string; 
               </div>
             </header>
 
-            <ClockWidget />
+            <ClockWidget onOpenLog={() => setView("timelog")} />
 
             {syncStatus && <div className="banner">{syncStatus}</div>}
 
@@ -287,6 +289,8 @@ export default function Dashboard({ userEmail, userName }: { userEmail: string; 
           <AnalyticsView apps={apps} counts={counts} />
         )}
 
+        {view === "timelog" && <TimeLogView />}
+
         {view === "settings" && (
           <SettingsView userEmail={userEmail} syncing={syncing} onSync={syncGmail} syncStatus={syncStatus} />
         )}
@@ -301,55 +305,63 @@ export default function Dashboard({ userEmail, userName }: { userEmail: string; 
   );
 }
 
-// --- Clock In / Out widget ----------------------------------------------------
-// Persists sessions in localStorage so they survive reloads. Tracks today + week
-// totals and shows a live ticking timer while clocked in.
+// === Clock In / Out widget — server-backed via /api/time-sessions ===
+// Sessions are persisted in Postgres and shared across browsers/devices. The
+// widget polls every 15s so if you clock in on your phone, this widget catches
+// up on the next poll. Live ticking is local for smoothness.
 
-interface ClockSession { start: string; end: string | null; }
-const CLOCK_STORAGE_KEY = "jobstacking_clock_sessions";
-
-function ClockWidget() {
-  const [sessions, setSessions] = useState<ClockSession[]>([]);
+function ClockWidget({ onOpenLog }: { onOpenLog: () => void }) {
+  const [sessions, setSessions] = useState<TimeSession[]>([]);
+  const [busy, setBusy] = useState(false);
   const [, setTick] = useState(0);
 
-  // Hydrate from localStorage on mount.
-  useEffect(() => {
+  const refresh = useCallback(async () => {
     try {
-      const raw = typeof window !== "undefined" ? window.localStorage.getItem(CLOCK_STORAGE_KEY) : null;
-      if (raw) setSessions(JSON.parse(raw));
+      const res = await fetch("/api/time-sessions");
+      if (!res.ok) return;
+      const data = await res.json();
+      setSessions(data.sessions || []);
     } catch {}
   }, []);
 
-  const active = sessions.find((s) => !s.end);
+  useEffect(() => { refresh(); }, [refresh]);
 
-  // Tick once a second while clocked in so the live timer updates.
+  const active = sessions.find((s) => !s.ended_at) ?? null;
+
+  // Local 1s tick so the timer keeps moving without re-fetching.
   useEffect(() => {
     if (!active) return;
     const id = setInterval(() => setTick((t) => t + 1), 1000);
     return () => clearInterval(id);
   }, [active]);
 
-  function save(next: ClockSession[]) {
-    setSessions(next);
-    try { window.localStorage.setItem(CLOCK_STORAGE_KEY, JSON.stringify(next)); } catch {}
+  // Cross-browser sync poll.
+  useEffect(() => {
+    const id = setInterval(refresh, 15000);
+    return () => clearInterval(id);
+  }, [refresh]);
+
+  async function clockIn() {
+    if (busy) return;
+    setBusy(true);
+    try {
+      await fetch("/api/time-sessions", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({}) });
+      await refresh();
+    } finally { setBusy(false); }
+  }
+  async function clockOut() {
+    if (busy) return;
+    setBusy(true);
+    try {
+      await fetch("/api/time-sessions", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "out" }) });
+      await refresh();
+    } finally { setBusy(false); }
   }
 
-  function clockIn() {
-    if (active) return;
-    save([...sessions, { start: new Date().toISOString(), end: null }]);
+  function durationMs(s: TimeSession): number {
+    const end = s.ended_at ? new Date(s.ended_at).getTime() : Date.now();
+    return Math.max(0, end - new Date(s.started_at).getTime());
   }
-
-  function clockOut() {
-    if (!active) return;
-    const now = new Date().toISOString();
-    save(sessions.map((s) => (s.end ? s : { ...s, end: now })));
-  }
-
-  function durationMs(s: ClockSession): number {
-    const end = s.end ? new Date(s.end).getTime() : Date.now();
-    return Math.max(0, end - new Date(s.start).getTime());
-  }
-
   function fmtTimer(ms: number): string {
     const total = Math.floor(ms / 1000);
     const h = String(Math.floor(total / 3600)).padStart(2, "0");
@@ -357,7 +369,6 @@ function ClockWidget() {
     const s = String(total % 60).padStart(2, "0");
     return `${h}:${m}:${s}`;
   }
-
   function fmtDur(ms: number): string {
     const total = Math.floor(ms / 1000);
     const h = Math.floor(total / 3600);
@@ -366,12 +377,18 @@ function ClockWidget() {
     if (m > 0) return `${m}m`;
     return `${total}s`;
   }
+  function localDayKey(iso: string): string {
+    const d = new Date(iso);
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, "0");
+    const day = String(d.getDate()).padStart(2, "0");
+    return `${y}-${m}-${day}`;
+  }
 
-  const todayIso = isoDate(new Date());
-  const weekStartIso = isoDate(startOfWeek(new Date()));
-  const todayMs = sessions.filter((s) => s.start.slice(0, 10) === todayIso).reduce((sum, s) => sum + durationMs(s), 0);
-  const weekMs = sessions.filter((s) => s.start.slice(0, 10) >= weekStartIso).reduce((sum, s) => sum + durationMs(s), 0);
-  const totalSessions = sessions.filter((s) => s.start.slice(0, 10) === todayIso).length;
+  const todayKey = localDayKey(new Date().toISOString());
+  const weekStart = startOfWeek(new Date()).getTime();
+  const todayMs = sessions.filter((s) => localDayKey(s.started_at) === todayKey).reduce((sum, s) => sum + durationMs(s), 0);
+  const weekMs = sessions.filter((s) => new Date(s.started_at).getTime() >= weekStart).reduce((sum, s) => sum + durationMs(s), 0);
 
   return (
     <div
@@ -397,10 +414,8 @@ function ClockWidget() {
           </div>
           <div style={{ fontSize: 12, color: "var(--text-muted)" }}>
             {active
-              ? `Started at ${new Date(active.start).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`
-              : totalSessions > 0
-                ? `${totalSessions} session${totalSessions === 1 ? "" : "s"} today`
-                : "Track your job-hunting hours"}
+              ? `Started at ${new Date(active.started_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`
+              : "Synced across devices · click Clock in to start"}
           </div>
         </div>
       </div>
@@ -411,9 +426,24 @@ function ClockWidget() {
           <span>Week <strong style={{ color: "var(--text)", fontWeight: 700, marginLeft: 4, fontSize: 14 }}>{fmtDur(weekMs)}</strong></span>
         </div>
 
+        <button
+          onClick={onOpenLog}
+          style={{
+            background: "transparent",
+            color: "var(--text-muted)",
+            border: "none",
+            cursor: "pointer",
+            fontSize: 12,
+            textDecoration: "underline",
+          }}
+        >
+          View log →
+        </button>
+
         {active ? (
           <button
             onClick={clockOut}
+            disabled={busy}
             style={{
               background: "var(--danger)",
               color: "#fff",
@@ -422,13 +452,14 @@ function ClockWidget() {
               padding: "10px 18px",
               fontWeight: 700,
               fontSize: 14,
-              cursor: "pointer",
+              cursor: busy ? "wait" : "pointer",
               display: "inline-flex",
               alignItems: "center",
               gap: 10,
               fontVariantNumeric: "tabular-nums",
               minWidth: 180,
               justifyContent: "center",
+              opacity: busy ? 0.7 : 1,
             }}
           >
             <span
@@ -447,6 +478,7 @@ function ClockWidget() {
         ) : (
           <button
             onClick={clockIn}
+            disabled={busy}
             style={{
               background: "var(--primary)",
               color: "#fff",
@@ -455,13 +487,14 @@ function ClockWidget() {
               padding: "10px 18px",
               fontWeight: 700,
               fontSize: 14,
-              cursor: "pointer",
+              cursor: busy ? "wait" : "pointer",
               display: "inline-flex",
               alignItems: "center",
               gap: 8,
+              opacity: busy ? 0.7 : 1,
             }}
           >
-            ▶ Clock in
+            {busy ? "…" : "▶ Clock in"}
           </button>
         )}
       </div>
