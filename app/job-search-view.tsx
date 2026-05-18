@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import CoverLetterModal, { CoverLetterJob } from "./cover-letter-modal";
 import ResumeModal, { TailorResumeJob } from "./resume-modal";
 
@@ -25,6 +25,8 @@ const SOURCE_COLORS: Record<string, string> = {
   RemoteOK: "#0891b2",
 };
 
+type DatePosted = "all" | "today" | "3days" | "week" | "month";
+
 function initials(s: string) { return (s || "").split(/\s+/).slice(0, 2).map((w) => w[0]).join("").toUpperCase(); }
 function stringToColor(s: string) {
   const palette = ["#4f46e5","#0ea5e9","#10b981","#f59e0b","#ef4444","#8b5cf6","#ec4899","#14b8a6","#f97316","#06b6d4"];
@@ -43,6 +45,24 @@ function timeAgo(iso: string) {
   if (days < 365) return `${Math.floor(days / 30)}mo ago`;
   return `${Math.floor(days / 365)}y ago`;
 }
+function daysSince(iso: string): number | null {
+  if (!iso) return null;
+  const d = new Date(iso);
+  if (isNaN(+d)) return null;
+  return Math.floor((Date.now() - d.getTime()) / 86400000);
+}
+function withinDatePosted(iso: string, range: DatePosted): boolean {
+  if (range === "all") return true;
+  const days = daysSince(iso);
+  if (days === null) return false;
+  switch (range) {
+    case "today": return days <= 0;
+    case "3days": return days <= 3;
+    case "week":  return days <= 7;
+    case "month": return days <= 30;
+    default:      return true;
+  }
+}
 
 export default function JobSearchView({ onTracked }: { onTracked: () => void }) {
   const [minSalary, setMinSalary] = useState(70000);
@@ -55,6 +75,8 @@ export default function JobSearchView({ onTracked }: { onTracked: () => void }) 
   const [error, setError] = useState("");
   const [page, setPage] = useState(1);
   const [sortBy, setSortBy] = useState<"newest" | "salary">("newest");
+  const [sourceFilter, setSourceFilter] = useState<string>("all");
+  const [datePosted, setDatePosted] = useState<DatePosted>("all");
   const [coverJob, setCoverJob] = useState<CoverLetterJob | null>(null);
   const [resumeJob, setResumeJob] = useState<TailorResumeJob | null>(null);
   const PAGE_SIZE = 25;
@@ -106,8 +128,10 @@ export default function JobSearchView({ onTracked }: { onTracked: () => void }) 
     return m ? Number(m[1]) * 1000 : 0;
   }
 
-  const filtered = (() => {
+  const filtered = useMemo(() => {
     let rows = jobs.slice();
+    if (sourceFilter !== "all") rows = rows.filter((j) => j.source === sourceFilter);
+    if (datePosted !== "all")   rows = rows.filter((j) => withinDatePosted(j.posted, datePosted));
     if (query) {
       const q = query.toLowerCase();
       rows = rows.filter((j) =>
@@ -120,10 +144,21 @@ export default function JobSearchView({ onTracked }: { onTracked: () => void }) 
       rows.sort((a, b) => parseSalary(b.salary) - parseSalary(a.salary));
     }
     return rows;
-  })();
+  }, [jobs, sourceFilter, datePosted, query, sortBy]);
 
   const paged = filtered.slice(0, page * PAGE_SIZE);
   const hasMore = paged.length < filtered.length;
+
+  const activeFilterCount =
+    (sourceFilter !== "all" ? 1 : 0) +
+    (datePosted !== "all" ? 1 : 0) +
+    (query ? 1 : 0);
+
+  function clearFilters() {
+    setSourceFilter("all");
+    setDatePosted("all");
+    setQuery("");
+  }
 
   return (
     <section className="view jobs-view">
@@ -142,12 +177,29 @@ export default function JobSearchView({ onTracked }: { onTracked: () => void }) 
 
       {Object.keys(bySource).length > 0 && (
         <div className="source-bar">
+          <button
+            type="button"
+            className={`source-chip ${sourceFilter === "all" ? "source-chip-active" : ""}`}
+            onClick={() => setSourceFilter("all")}
+            title="Show jobs from all boards"
+          >
+            <span className="source-dot" style={{ background: "#15182b" }} />
+            <strong>All boards</strong>
+            <span className="source-count">{total}</span>
+          </button>
           {Object.entries(bySource).sort((a, b) => b[1] - a[1]).map(([k, v]) => (
-            <div key={k} className="source-chip" style={{ borderColor: SOURCE_COLORS[k] || "#999", color: SOURCE_COLORS[k] || "#333" }}>
+            <button
+              key={k}
+              type="button"
+              className={`source-chip ${sourceFilter === k ? "source-chip-active" : ""}`}
+              style={{ borderColor: SOURCE_COLORS[k] || "#999", color: SOURCE_COLORS[k] || "#333" }}
+              onClick={() => setSourceFilter(sourceFilter === k ? "all" : k)}
+              title={`Show only ${k} jobs (click again to clear)`}
+            >
               <span className="source-dot" style={{ background: SOURCE_COLORS[k] || "#999" }} />
               <strong>{k}</strong>
               <span className="source-count">{v}</span>
-            </div>
+            </button>
           ))}
         </div>
       )}
@@ -177,6 +229,13 @@ export default function JobSearchView({ onTracked }: { onTracked: () => void }) 
           </div>
         </div>
         <div className="filter-sort">
+          <select value={datePosted} onChange={(e) => setDatePosted(e.target.value as DatePosted)} className="select" title="Filter by date posted">
+            <option value="all">Any date posted</option>
+            <option value="today">Posted today</option>
+            <option value="3days">Last 3 days</option>
+            <option value="week">Last 7 days</option>
+            <option value="month">Last 30 days</option>
+          </select>
           <select value={sortBy} onChange={(e) => setSortBy(e.target.value as any)} className="select">
             <option value="newest">Newest</option>
             <option value="salary">Highest salary</option>
@@ -186,6 +245,13 @@ export default function JobSearchView({ onTracked }: { onTracked: () => void }) 
           </button>
         </div>
       </div>
+
+      {activeFilterCount > 0 && (
+        <div className="active-filters">
+          <span className="muted small">{activeFilterCount} filter{activeFilterCount === 1 ? "" : "s"} active · </span>
+          <button className="link-btn" onClick={clearFilters}>Clear all</button>
+        </div>
+      )}
 
       {error && <div className="alert alert-error">{error}</div>}
 
@@ -199,12 +265,12 @@ export default function JobSearchView({ onTracked }: { onTracked: () => void }) 
         <div className="jobs-empty">
           <div className="jobs-empty-icon">🔍</div>
           <h3>No jobs match your filters</h3>
-          <p className="muted">Try lowering the salary minimum or clearing the search.</p>
+          <p className="muted">Try lowering the salary minimum, widening the date range, or {activeFilterCount > 0 ? <button className="link-btn" onClick={clearFilters}>clearing your filters</button> : "clearing the search"}.</p>
         </div>
       ) : (
         <>
           <div className="jobs-count-bar">
-            <strong>{filtered.length.toLocaleString()}</strong> jobs match · <span className="muted">showing {paged.length}</span>
+            <strong>{filtered.length.toLocaleString()}</strong> jobs match · <span className="muted">showing {paged.length}{activeFilterCount > 0 ? ` of ${jobs.length} loaded` : ""}</span>
           </div>
           <ul className="jobs-list">
             {paged.map((j) => (
