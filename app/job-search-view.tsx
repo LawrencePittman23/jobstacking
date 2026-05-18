@@ -92,10 +92,10 @@ export default function JobSearchView({ onTracked }: { onTracked: () => void }) 
   const [resumeJob, setResumeJob] = useState<TailorResumeJob | null>(null);
   const PAGE_SIZE = 25;
 
-  async function search(targetSalary = minSalary) {
+  async function search(targetSalary = minSalary, force = false) {
     setLoading(true); setError(""); setPage(1);
     try {
-      const res = await fetch(`/api/jobs/search?salary=${targetSalary}`);
+      const res = await fetch(`/api/jobs/search?salary=${targetSalary}${force ? "&refresh=1" : ""}`);
       if (!res.ok) throw new Error("Search failed");
       const data = await res.json();
       setJobs(data.jobs || []);
@@ -251,7 +251,7 @@ export default function JobSearchView({ onTracked }: { onTracked: () => void }) 
             <option value="newest">Newest</option>
             <option value="salary">Highest salary</option>
           </select>
-          <button className="btn btn-primary" onClick={() => search()} disabled={loading}>
+          <button className="btn btn-primary" onClick={() => search(minSalary, true)} disabled={loading} title="Force fresh fetch (bypasses the 30-min cache)">
             {loading ? "…" : "Refresh"}
           </button>
         </div>
