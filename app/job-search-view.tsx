@@ -37,6 +37,13 @@ const SOURCE_COLORS: Record<string, string> = {
 };
 
 type DatePosted = "all" | "today" | "3days" | "week" | "month";
+const DATE_LABEL: Record<DatePosted, string> = {
+  all: "Total openings",
+  today: "Posted today",
+  "3days": "Last 3 days",
+  week: "Last 7 days",
+  month: "Last 30 days",
+};
 
 function initials(s: string) { return (s || "").split(/\s+/).slice(0, 2).map((w) => w[0]).join("").toUpperCase(); }
 function stringToColor(s: string) {
@@ -80,7 +87,6 @@ export default function JobSearchView({ onTracked }: { onTracked: () => void }) 
   const [query, setQuery] = useState("");
   const [jobs, setJobs] = useState<Job[]>([]);
   const [total, setTotal] = useState(0);
-  const [bySource, setBySource] = useState<Record<string, number>>({});
   const [loading, setLoading] = useState(false);
   const [tracked, setTracked] = useState<Set<string>>(new Set());
   const [error, setError] = useState("");
@@ -100,7 +106,6 @@ export default function JobSearchView({ onTracked }: { onTracked: () => void }) 
       const data = await res.json();
       setJobs(data.jobs || []);
       setTotal(data.total || 0);
-      setBySource(data.bySource || {});
     } catch (e: any) {
       setError(e.message || "Search failed");
     } finally {
@@ -139,10 +144,25 @@ export default function JobSearchView({ onTracked }: { onTracked: () => void }) 
     return m ? Number(m[1]) * 1000 : 0;
   }
 
+  // Jobs after date filter only — used for per-board chip counts and hero total.
+  // The source filter is NOT applied here so all board chips remain visible.
+  const dateFilteredJobs = useMemo(() => {
+    if (datePosted === "all") return jobs;
+    return jobs.filter((j) => withinDatePosted(j.posted, datePosted));
+  }, [jobs, datePosted]);
+
+  // Per-board counts, recomputed whenever the date filter changes.
+  const bySourceForDate = useMemo(() => {
+    const m: Record<string, number> = {};
+    for (const j of dateFilteredJobs) m[j.source] = (m[j.source] || 0) + 1;
+    return m;
+  }, [dateFilteredJobs]);
+
+  const totalForDate = dateFilteredJobs.length;
+
   const filtered = useMemo(() => {
-    let rows = jobs.slice();
+    let rows = dateFilteredJobs.slice();
     if (sourceFilter !== "all") rows = rows.filter((j) => j.source === sourceFilter);
-    if (datePosted !== "all")   rows = rows.filter((j) => withinDatePosted(j.posted, datePosted));
     if (query) {
       const q = query.toLowerCase();
       rows = rows.filter((j) =>
@@ -155,7 +175,7 @@ export default function JobSearchView({ onTracked }: { onTracked: () => void }) 
       rows.sort((a, b) => parseSalary(b.salary) - parseSalary(a.salary));
     }
     return rows;
-  }, [jobs, sourceFilter, datePosted, query, sortBy]);
+  }, [dateFilteredJobs, sourceFilter, query, sortBy]);
 
   const paged = filtered.slice(0, page * PAGE_SIZE);
   const hasMore = paged.length < filtered.length;
@@ -180,13 +200,19 @@ export default function JobSearchView({ onTracked }: { onTracked: () => void }) 
         </div>
         <div className="jobs-hero-stats">
           <div className="hero-stat">
-            <div className="hero-stat-value">{total.toLocaleString()}</div>
-            <div className="hero-stat-label">Total openings</div>
+            <div className="hero-stat-value">{totalForDate.toLocaleString()}</div>
+            <div className="hero-stat-label">{DATE_LABEL[datePosted]}</div>
           </div>
+          {datePosted !== "all" && (
+            <div className="hero-stat hero-stat-secondary">
+              <div className="hero-stat-value">{total.toLocaleString()}</div>
+              <div className="hero-stat-label">All time</div>
+            </div>
+          )}
         </div>
       </header>
 
-      {Object.keys(bySource).length > 0 && (
+      {Object.keys(bySourceForDate).length > 0 && (
         <div className="source-bar">
           <button
             type="button"
@@ -196,9 +222,9 @@ export default function JobSearchView({ onTracked }: { onTracked: () => void }) 
           >
             <span className="source-dot" style={{ background: "#15182b" }} />
             <strong>All boards</strong>
-            <span className="source-count">{total}</span>
+            <span className="source-count">{totalForDate}</span>
           </button>
-          {Object.entries(bySource).sort((a, b) => b[1] - a[1]).map(([k, v]) => (
+          {Object.entries(bySourceForDate).sort((a, b) => b[1] - a[1]).map(([k, v]) => (
             <button
               key={k}
               type="button"
