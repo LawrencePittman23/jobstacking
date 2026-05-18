@@ -41,6 +41,19 @@ async function timedFetch(url: string, init: RequestInit & { next?: any } = {}, 
   }
 }
 
+// Detects whether a JSearch job is LinkedIn Easy Apply (apply happens on
+// LinkedIn directly rather than redirecting to a company site).
+function isLinkedInEasyApply(j: any): boolean {
+  if (Array.isArray(j?.apply_options)) {
+    const hasDirect = j.apply_options.some((opt: any) =>
+      /linkedin/i.test(opt?.publisher || "") && opt?.is_direct === true
+    );
+    if (hasDirect) return true;
+  }
+  const link = j?.job_apply_link || "";
+  return /linkedin\.com\/jobs\/view\//i.test(link);
+}
+
 // Normalize JSearch's `job_publisher` to consistent source names so they group
 // cleanly under the source-filter chips on the Job Search view.
 function normalizePublisher(raw: string): string {
@@ -64,6 +77,30 @@ function normalizePublisher(raw: string): string {
     return name.charAt(0).toUpperCase() + name.slice(1);
   }
   return raw;
+}
+
+function mapJSearchJob(j: any, idPrefix = "jsearch"): Job {
+  const publisher = normalizePublisher(j.job_publisher || "");
+  const easyApply = publisher === "LinkedIn" && isLinkedInEasyApply(j);
+  const source = easyApply ? "LinkedIn Easy Apply" : publisher;
+  const sMin = j.job_min_salary;
+  // When Easy Apply is detected, prefer the LinkedIn apply link so clicking
+  // "Apply" takes the user straight into the Easy Apply flow.
+  let url = j.job_apply_link || j.job_google_link || "";
+  if (easyApply && Array.isArray(j.apply_options)) {
+    const liOpt = j.apply_options.find((o: any) => /linkedin/i.test(o?.publisher || ""));
+    if (liOpt?.apply_link) url = liOpt.apply_link;
+  }
+  return {
+    id: `${idPrefix}-${j.job_id}`,
+    title: j.job_title || "",
+    company: j.employer_name || "",
+    location: j.job_is_remote ? "Remote" : [j.job_city, j.job_state, j.job_country].filter(Boolean).join(", "),
+    salary: sMin ? `$${Math.floor(sMin / 1000)}k${j.job_max_salary ? `-$${Math.floor(j.job_max_salary / 1000)}k` : ""}` : "",
+    url,
+    source,
+    posted: j.job_posted_at_datetime_utc || "",
+  };
 }
 
 async function fetchRemotive(): Promise<Job[]> {
@@ -152,6 +189,36 @@ async function fetchAdzuna(minSalary: number): Promise<Job[]> {
   } catch { return []; }
 }
 
+// Dedicated LinkedIn-only JSearch pass. Tags Easy Apply jobs as a separate source.
+async function fetchJSearchLinkedIn(minSalary: number): Promise<Job[]> {
+  const apiKey = process.env.RAPIDAPI_KEY;
+  if (!apiKey) return [];
+  try {
+    const queries = ["Sales Development Representative", "Business Development Representative", "SDR", "BDR"];
+    const all: Job[] = [];
+    for (const q of queries) {
+      for (let page = 1; page <= 2; page++) {
+        const url = `https://jsearch.p.rapidapi.com/search?query=${encodeURIComponent(q)}&page=${page}&num_pages=1&date_posted=month&remote_jobs_only=true&job_publishers=LinkedIn`;
+        const res = await timedFetch(url, {
+          headers: { "X-RapidAPI-Key": apiKey, "X-RapidAPI-Host": "jsearch.p.rapidapi.com" },
+          next: { revalidate: 1800 },
+        } as any, 5000);
+        if (!res || !res.ok) break;
+        const data: any = await res.json();
+        const items = data.data || [];
+        if (items.length === 0) break;
+        for (const j of items) {
+          if (!matchesSdrBdr(j.job_title || "")) continue;
+          const sMin = j.job_min_salary;
+          if (minSalary > 0 && sMin && sMin < minSalary) continue;
+          all.push(mapJSearchJob(j, "jsearch-li"));
+        }
+      }
+    }
+    return all;
+  } catch { return []; }
+}
+
 async function fetchJSearch(minSalary: number): Promise<Job[]> {
   const apiKey = process.env.RAPIDAPI_KEY;
   if (!apiKey) return [];
@@ -173,19 +240,7 @@ async function fetchJSearch(minSalary: number): Promise<Job[]> {
           if (!matchesSdrBdr(j.job_title || "")) continue;
           const sMin = j.job_min_salary;
           if (minSalary > 0 && sMin && sMin < minSalary) continue;
-          // Use the underlying publisher (LinkedIn, Indeed, ZipRecruiter, Glassdoor, ...)
-          // as the source so users can filter by board.
-          const source = normalizePublisher(j.job_publisher || "");
-          all.push({
-            id: `jsearch-${j.job_id}`,
-            title: j.job_title || "",
-            company: j.employer_name || "",
-            location: j.job_is_remote ? "Remote" : [j.job_city, j.job_state, j.job_country].filter(Boolean).join(", "),
-            salary: sMin ? `$${Math.floor(sMin / 1000)}k${j.job_max_salary ? `-$${Math.floor(j.job_max_salary / 1000)}k` : ""}` : "",
-            url: j.job_apply_link || j.job_google_link || "",
-            source,
-            posted: j.job_posted_at_datetime_utc || "",
-          });
+          all.push(mapJSearchJob(j, "jsearch"));
         }
       }
     }
@@ -286,15 +341,19 @@ async function fetchATS(): Promise<Job[]> {
 }
 
 export async function fetchAllSdrBdrJobs(minSalary: number = 0): Promise<{ jobs: Job[]; bySource: Record<string, number> }> {
-  const [remotive, remoteok, adzuna, jsearch, ats] = await Promise.allSettled([
+  const [remotive, remoteok, adzuna, jsearchLI, jsearch, ats] = await Promise.allSettled([
     fetchRemotive(),
     fetchRemoteOK(),
     fetchAdzuna(minSalary),
+    fetchJSearchLinkedIn(minSalary),
     fetchJSearch(minSalary),
     fetchATS(),
   ]);
 
+  // Order matters for dedup: LinkedIn Easy Apply pass runs BEFORE the general
+  // JSearch pass so any duplicates retain their Easy Apply label.
   const all: Job[] = [
+    ...(jsearchLI.status === "fulfilled" ? jsearchLI.value : []),
     ...(remotive.status === "fulfilled" ? remotive.value : []),
     ...(remoteok.status === "fulfilled" ? remoteok.value : []),
     ...(adzuna.status === "fulfilled" ? adzuna.value : []),
