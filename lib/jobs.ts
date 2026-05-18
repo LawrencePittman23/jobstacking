@@ -41,8 +41,7 @@ async function timedFetch(url: string, init: RequestInit & { next?: any } = {}, 
   }
 }
 
-// Detects whether a JSearch job is LinkedIn Easy Apply (apply happens on
-// LinkedIn directly rather than redirecting to a company site).
+// Detects whether a JSearch job is LinkedIn Easy Apply.
 function isLinkedInEasyApply(j: any): boolean {
   if (Array.isArray(j?.apply_options)) {
     const hasDirect = j.apply_options.some((opt: any) =>
@@ -54,8 +53,6 @@ function isLinkedInEasyApply(j: any): boolean {
   return /linkedin\.com\/jobs\/view\//i.test(link);
 }
 
-// Normalize JSearch's `job_publisher` to consistent source names so they group
-// cleanly under the source-filter chips on the Job Search view.
 function normalizePublisher(raw: string): string {
   if (!raw) return "JSearch";
   const lower = raw.toLowerCase().trim();
@@ -84,8 +81,6 @@ function mapJSearchJob(j: any, idPrefix = "jsearch"): Job {
   const easyApply = publisher === "LinkedIn" && isLinkedInEasyApply(j);
   const source = easyApply ? "LinkedIn Easy Apply" : publisher;
   const sMin = j.job_min_salary;
-  // When Easy Apply is detected, prefer the LinkedIn apply link so clicking
-  // "Apply" takes the user straight into the Easy Apply flow.
   let url = j.job_apply_link || j.job_google_link || "";
   if (easyApply && Array.isArray(j.apply_options)) {
     const liOpt = j.apply_options.find((o: any) => /linkedin/i.test(o?.publisher || ""));
@@ -106,15 +101,18 @@ function mapJSearchJob(j: any, idPrefix = "jsearch"): Job {
 async function fetchRemotive(): Promise<Job[]> {
   try {
     const queries = ["SDR", "BDR", "sales development", "business development representative"];
-    const all: Job[] = [];
-    for (const q of queries) {
-      const res = await timedFetch(`https://remotive.com/api/remote-jobs?search=${encodeURIComponent(q)}`, { next: { revalidate: 1800 } } as any, 4000);
-      if (!res || !res.ok) continue;
-      const data: any = await res.json();
+    const tasks = queries.map((q) =>
+      timedFetch(`https://remotive.com/api/remote-jobs?search=${encodeURIComponent(q)}`, { next: { revalidate: 1800 } } as any, 4000)
+    );
+    const responses = await Promise.allSettled(tasks);
+    const out: Job[] = [];
+    for (const r of responses) {
+      if (r.status !== "fulfilled" || !r.value || !r.value.ok) continue;
+      const data: any = await r.value.json();
       for (const j of data.jobs || []) {
         const tagStr = (j.tags || []).join(" ");
         if (!matchesSdrBdr(j.title || "", tagStr)) continue;
-        all.push({
+        out.push({
           id: `remotive-${j.id}`,
           title: j.title || "",
           company: j.company_name || "",
@@ -126,7 +124,7 @@ async function fetchRemotive(): Promise<Job[]> {
         });
       }
     }
-    return all;
+    return out;
   } catch { return []; }
 }
 
@@ -160,62 +158,69 @@ async function fetchAdzuna(minSalary: number): Promise<Job[]> {
   if (!appId || !apiKey) return [];
   try {
     const queries = ["remote sales development representative", "remote business development representative", "remote SDR", "remote BDR"];
-    const all: Job[] = [];
+    const pages = [1, 2];
+    // Fan out all query/page combinations in parallel.
+    const tasks: Promise<Response | null>[] = [];
+    const meta: { q: string; page: number }[] = [];
     for (const q of queries) {
-      for (let page = 1; page <= 3; page++) {
+      for (const page of pages) {
         const url = `https://api.adzuna.com/v1/api/jobs/us/search/${page}?app_id=${appId}&app_key=${apiKey}&what=${encodeURIComponent(q)}&results_per_page=50${minSalary > 0 ? `&salary_min=${minSalary}` : ""}`;
-        const res = await timedFetch(url, { next: { revalidate: 1800 } } as any, 4000);
-        if (!res || !res.ok) break;
-        const data: any = await res.json();
-        const results = data.results || [];
-        if (results.length === 0) break;
-        for (const j of results) {
-          if (!matchesSdrBdr(j.title || "")) continue;
-          all.push({
-            id: `adzuna-${j.id}`,
-            title: j.title || "",
-            company: j.company?.display_name || "",
-            location: j.location?.display_name || "",
-            salary: j.salary_min ? `$${Math.floor(j.salary_min / 1000)}k${j.salary_max && j.salary_max !== j.salary_min ? `-$${Math.floor(j.salary_max / 1000)}k` : ""}` : "",
-            url: j.redirect_url || "",
-            source: "Adzuna",
-            posted: j.created || "",
-          });
-        }
-        if (results.length < 50) break;
+        tasks.push(timedFetch(url, { next: { revalidate: 1800 } } as any, 4000));
+        meta.push({ q, page });
       }
     }
-    return all;
+    const responses = await Promise.allSettled(tasks);
+    const out: Job[] = [];
+    for (const r of responses) {
+      if (r.status !== "fulfilled" || !r.value || !r.value.ok) continue;
+      const data: any = await r.value.json();
+      const results = data.results || [];
+      for (const j of results) {
+        if (!matchesSdrBdr(j.title || "")) continue;
+        out.push({
+          id: `adzuna-${j.id}`,
+          title: j.title || "",
+          company: j.company?.display_name || "",
+          location: j.location?.display_name || "",
+          salary: j.salary_min ? `$${Math.floor(j.salary_min / 1000)}k${j.salary_max && j.salary_max !== j.salary_min ? `-$${Math.floor(j.salary_max / 1000)}k` : ""}` : "",
+          url: j.redirect_url || "",
+          source: "Adzuna",
+          posted: j.created || "",
+        });
+      }
+    }
+    return out;
   } catch { return []; }
 }
 
 // Dedicated LinkedIn-only JSearch pass. Tags Easy Apply jobs as a separate source.
+// Parallelized so it finishes in ~5s regardless of how many queries.
 async function fetchJSearchLinkedIn(minSalary: number): Promise<Job[]> {
   const apiKey = process.env.RAPIDAPI_KEY;
   if (!apiKey) return [];
   try {
-    const queries = ["Sales Development Representative", "Business Development Representative", "SDR", "BDR"];
-    const all: Job[] = [];
-    for (const q of queries) {
-      for (let page = 1; page <= 2; page++) {
-        const url = `https://jsearch.p.rapidapi.com/search?query=${encodeURIComponent(q)}&page=${page}&num_pages=1&date_posted=month&remote_jobs_only=true&job_publishers=LinkedIn`;
-        const res = await timedFetch(url, {
-          headers: { "X-RapidAPI-Key": apiKey, "X-RapidAPI-Host": "jsearch.p.rapidapi.com" },
-          next: { revalidate: 1800 },
-        } as any, 5000);
-        if (!res || !res.ok) break;
-        const data: any = await res.json();
-        const items = data.data || [];
-        if (items.length === 0) break;
-        for (const j of items) {
-          if (!matchesSdrBdr(j.job_title || "")) continue;
-          const sMin = j.job_min_salary;
-          if (minSalary > 0 && sMin && sMin < minSalary) continue;
-          all.push(mapJSearchJob(j, "jsearch-li"));
-        }
+    const queries = ["Sales Development Representative", "Business Development Representative"];
+    const tasks = queries.map((q) => {
+      const url = `https://jsearch.p.rapidapi.com/search?query=${encodeURIComponent(q)}&page=1&num_pages=1&date_posted=month&remote_jobs_only=true&job_publishers=LinkedIn`;
+      return timedFetch(url, {
+        headers: { "X-RapidAPI-Key": apiKey, "X-RapidAPI-Host": "jsearch.p.rapidapi.com" },
+        next: { revalidate: 1800 },
+      } as any, 6000);
+    });
+    const responses = await Promise.allSettled(tasks);
+    const out: Job[] = [];
+    for (const r of responses) {
+      if (r.status !== "fulfilled" || !r.value || !r.value.ok) continue;
+      const data: any = await r.value.json();
+      const items = data.data || [];
+      for (const j of items) {
+        if (!matchesSdrBdr(j.job_title || "")) continue;
+        const sMin = j.job_min_salary;
+        if (minSalary > 0 && sMin && sMin < minSalary) continue;
+        out.push(mapJSearchJob(j, "jsearch-li"));
       }
     }
-    return all;
+    return out;
   } catch { return []; }
 }
 
@@ -224,27 +229,31 @@ async function fetchJSearch(minSalary: number): Promise<Job[]> {
   if (!apiKey) return [];
   try {
     const queries = ["Sales Development Representative", "Business Development Representative"];
-    const all: Job[] = [];
+    const pages = [1, 2];
+    const tasks: Promise<Response | null>[] = [];
     for (const q of queries) {
-      for (let page = 1; page <= 2; page++) {
+      for (const page of pages) {
         const url = `https://jsearch.p.rapidapi.com/search?query=${encodeURIComponent(q)}&page=${page}&num_pages=1&date_posted=month&remote_jobs_only=true`;
-        const res = await timedFetch(url, {
+        tasks.push(timedFetch(url, {
           headers: { "X-RapidAPI-Key": apiKey, "X-RapidAPI-Host": "jsearch.p.rapidapi.com" },
           next: { revalidate: 1800 },
-        } as any, 5000);
-        if (!res || !res.ok) break;
-        const data: any = await res.json();
-        const items = data.data || [];
-        if (items.length === 0) break;
-        for (const j of items) {
-          if (!matchesSdrBdr(j.job_title || "")) continue;
-          const sMin = j.job_min_salary;
-          if (minSalary > 0 && sMin && sMin < minSalary) continue;
-          all.push(mapJSearchJob(j, "jsearch"));
-        }
+        } as any, 6000));
       }
     }
-    return all;
+    const responses = await Promise.allSettled(tasks);
+    const out: Job[] = [];
+    for (const r of responses) {
+      if (r.status !== "fulfilled" || !r.value || !r.value.ok) continue;
+      const data: any = await r.value.json();
+      const items = data.data || [];
+      for (const j of items) {
+        if (!matchesSdrBdr(j.job_title || "")) continue;
+        const sMin = j.job_min_salary;
+        if (minSalary > 0 && sMin && sMin < minSalary) continue;
+        out.push(mapJSearchJob(j, "jsearch"));
+      }
+    }
+    return out;
   } catch { return []; }
 }
 
