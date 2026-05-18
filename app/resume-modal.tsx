@@ -30,6 +30,7 @@ export default function ResumeModal({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [applying, setApplying] = useState(false);
+  const [downloading, setDownloading] = useState(false);
 
   async function generate() {
     setLoading(true);
@@ -61,10 +62,166 @@ export default function ResumeModal({
     /* eslint-disable-next-line */
   }, []);
 
-  function downloadPDF() {
-    document.body.classList.add("printing-resume");
-    window.print();
-    setTimeout(() => document.body.classList.remove("printing-resume"), 500);
+  async function downloadPDF() {
+    if (!resume) return;
+    setDownloading(true);
+    try {
+      // Lazy-import so jsPDF doesn't ship in the SSR/initial bundle
+      const { default: jsPDF } = await import("jspdf");
+      const doc = new jsPDF({ unit: "pt", format: "letter" });
+
+      const pageWidth = doc.internal.pageSize.getWidth();
+      const pageHeight = doc.internal.pageSize.getHeight();
+      const margin = 50;
+      const contentWidth = pageWidth - margin * 2;
+      let y = margin;
+
+      const ensureSpace = (needed: number) => {
+        if (y + needed > pageHeight - margin) {
+          doc.addPage();
+          y = margin;
+        }
+      };
+
+      const addBody = (text: string, opts: { italic?: boolean; size?: number; color?: [number, number, number] } = {}) => {
+        const size = opts.size || 10.5;
+        const lineHeight = size * 1.35;
+        doc.setFont("times", opts.italic ? "italic" : "normal");
+        doc.setFontSize(size);
+        if (opts.color) doc.setTextColor(opts.color[0], opts.color[1], opts.color[2]);
+        else doc.setTextColor(26, 26, 26);
+        const lines = doc.splitTextToSize(text, contentWidth);
+        ensureSpace(lines.length * lineHeight);
+        doc.text(lines, margin, y);
+        y += lines.length * lineHeight;
+      };
+
+      const addSectionTitle = (title: string) => {
+        y += 8;
+        ensureSpace(20);
+        doc.setFont("times", "bold");
+        doc.setFontSize(11);
+        doc.setTextColor(26, 26, 26);
+        doc.text(title.toUpperCase(), margin, y);
+        y += 5;
+        doc.setLineWidth(0.5);
+        doc.setDrawColor(136, 136, 136);
+        doc.line(margin, y, pageWidth - margin, y);
+        y += 12;
+      };
+
+      // === HEADER: Name centered, uppercase ===
+      doc.setFont("times", "bold");
+      doc.setFontSize(20);
+      doc.setTextColor(26, 26, 26);
+      doc.text((resume.name || "").toUpperCase(), pageWidth / 2, y, { align: "center" });
+      y += 22;
+
+      // Contact line
+      const contactParts = [resume.contact?.email, resume.contact?.phone, resume.contact?.location, resume.contact?.linkedin].filter(Boolean) as string[];
+      if (contactParts.length) {
+        doc.setFont("times", "normal");
+        doc.setFontSize(10);
+        doc.setTextColor(68, 68, 68);
+        doc.text(contactParts.join("  ·  "), pageWidth / 2, y, { align: "center" });
+        y += 14;
+      }
+
+      // Divider under header
+      doc.setLineWidth(1.2);
+      doc.setDrawColor(26, 26, 26);
+      doc.line(margin, y, pageWidth - margin, y);
+      y += 14;
+
+      // === SUMMARY ===
+      if (resume.summary) {
+        addSectionTitle("Summary");
+        addBody(resume.summary);
+      }
+
+      // === EXPERIENCE ===
+      if (resume.experiences?.length > 0) {
+        addSectionTitle("Experience");
+        for (const exp of resume.experiences) {
+          ensureSpace(40);
+
+          // Title + company (bold left) ... dates + location (italic right)
+          doc.setFont("times", "bold");
+          doc.setFontSize(11);
+          doc.setTextColor(26, 26, 26);
+          const titleText = (exp.title || "") + (exp.company ? ` · ${exp.company}` : "");
+          doc.text(titleText, margin, y);
+
+          const meta = `${exp.dates || ""}${exp.location ? ` · ${exp.location}` : ""}`;
+          if (meta) {
+            doc.setFont("times", "italic");
+            doc.setFontSize(9.5);
+            doc.setTextColor(85, 85, 85);
+            const metaWidth = doc.getTextWidth(meta);
+            doc.text(meta, pageWidth - margin - metaWidth, y);
+          }
+          y += 14;
+
+          // Bullets
+          doc.setFont("times", "normal");
+          doc.setFontSize(10.5);
+          doc.setTextColor(26, 26, 26);
+          const bulletIndent = 14;
+          const bulletLineHeight = 10.5 * 1.35;
+          for (const bullet of exp.bullets || []) {
+            const wrapped = doc.splitTextToSize(bullet, contentWidth - bulletIndent);
+            ensureSpace(wrapped.length * bulletLineHeight + 2);
+            doc.text("•", margin + 4, y);
+            doc.text(wrapped, margin + bulletIndent, y);
+            y += wrapped.length * bulletLineHeight + 1;
+          }
+          y += 6;
+        }
+      }
+
+      // === SKILLS ===
+      if (resume.skills?.length > 0) {
+        addSectionTitle("Skills");
+        addBody(resume.skills.join("  ·  "));
+      }
+
+      // === EDUCATION ===
+      if (resume.education?.length > 0) {
+        addSectionTitle("Education");
+        for (const edu of resume.education) {
+          ensureSpace(22);
+          doc.setFont("times", "bold");
+          doc.setFontSize(10.5);
+          doc.setTextColor(26, 26, 26);
+          const eduText = (edu.degree || "") + (edu.school ? ` · ${edu.school}` : "");
+          doc.text(eduText, margin, y);
+
+          if (edu.dates) {
+            doc.setFont("times", "italic");
+            doc.setFontSize(9.5);
+            doc.setTextColor(85, 85, 85);
+            const datesWidth = doc.getTextWidth(edu.dates);
+            doc.text(edu.dates, pageWidth - margin - datesWidth, y);
+          }
+          y += 13;
+
+          if (edu.details) {
+            addBody(edu.details, { size: 10, color: [85, 85, 85] });
+          }
+          y += 4;
+        }
+      }
+
+      const safeName = (resume.name || "Resume").replace(/[^a-zA-Z0-9 ]/g, "").trim() || "Resume";
+      const safeCompany = (job.company || "").replace(/[^a-zA-Z0-9 ]/g, "").trim();
+      const filename = `${safeName}${safeCompany ? " - " + safeCompany : ""}.pdf`;
+      doc.save(filename);
+    } catch (e) {
+      console.error(e);
+      alert("Couldn't generate the PDF. Try again, or use Cmd/Ctrl+P as a fallback.");
+    } finally {
+      setDownloading(false);
+    }
   }
 
   async function applyNow() {
@@ -193,8 +350,8 @@ export default function ResumeModal({
           <button className="btn btn-ghost" onClick={generate} disabled={loading}>
             {loading ? "Generating…" : "↻ Regenerate"}
           </button>
-          <button className="btn btn-ghost" onClick={downloadPDF} disabled={loading || !resume}>
-            📄 Download PDF
+          <button className="btn btn-ghost" onClick={downloadPDF} disabled={loading || !resume || downloading}>
+            {downloading ? "Generating PDF…" : "📄 Download PDF"}
           </button>
           {job.url && (
             <button className="btn btn-primary" onClick={applyNow} disabled={loading || !resume || applying}>
