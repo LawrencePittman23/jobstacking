@@ -9,7 +9,7 @@ export interface Job {
   posted: string;
 }
 
-const SDR_BDR_RE = /\b(SDR|BDR|sales development|business development\s+(?:representative|rep)|outbound\s+sales|inside\s+sales\s+rep)\b/i;
+const SDR_BDR_RE = /\b(SDR|BDR|sales development|business development\s+(?:representative|rep)|outbound\s+sales|inside\s+sales\s+rep|account development\s+representative)\b/i;
 
 function matchesSdrBdr(title: string, extra: string = ""): boolean {
   return SDR_BDR_RE.test(title) || SDR_BDR_RE.test(extra);
@@ -52,7 +52,6 @@ function isLinkedInEasyApply(j: any): boolean {
   return /linkedin\.com\/jobs\/view\//i.test(link);
 }
 
-// Detect LinkedIn from any field — publisher, apply link, or apply_options.
 function isLinkedInJob(j: any): boolean {
   const pub = (j?.job_publisher || "").toLowerCase();
   if (pub.includes("linkedin")) return true;
@@ -88,9 +87,6 @@ function normalizePublisher(raw: string): string {
 }
 
 function mapJSearchJob(j: any, idPrefix = "jsearch"): Job {
-  // Two-step LinkedIn detection: trust publisher first, but if a non-LinkedIn
-  // publisher is reported yet the apply_link / apply_options point to LinkedIn,
-  // promote it to LinkedIn anyway.
   const fromPublisher = normalizePublisher(j.job_publisher || "");
   const linkedin = fromPublisher === "LinkedIn" || isLinkedInJob(j);
   const easyApply = linkedin && isLinkedInEasyApply(j);
@@ -208,17 +204,25 @@ async function fetchAdzuna(minSalary: number): Promise<Job[]> {
   } catch { return []; }
 }
 
-// JSearch — parallel fetches, no invalid filter params.
+// JSearch — pull a wide net (no remote/date filters at API level — our own
+// isRemoteJob() handles remote-only filtering downstream). This is critical:
+// LinkedIn/Indeed jobs frequently aren't tagged remote_jobs_only=true upstream
+// even when the location says "Remote", so the filter was dropping most of them.
 async function fetchJSearch(minSalary: number): Promise<Job[]> {
   const apiKey = process.env.RAPIDAPI_KEY;
   if (!apiKey) return [];
   try {
-    const queries = ["Sales Development Representative", "Business Development Representative", "SDR remote", "BDR remote"];
+    const queries = [
+      "remote Sales Development Representative",
+      "remote Business Development Representative",
+      "remote SDR",
+      "remote BDR",
+    ];
     const pages = [1, 2];
     const tasks: Promise<Response | null>[] = [];
     for (const q of queries) {
       for (const page of pages) {
-        const url = `https://jsearch.p.rapidapi.com/search?query=${encodeURIComponent(q)}&page=${page}&num_pages=1&date_posted=month&remote_jobs_only=true`;
+        const url = `https://jsearch.p.rapidapi.com/search?query=${encodeURIComponent(q)}&page=${page}&num_pages=1&country=us`;
         tasks.push(timedFetch(url, {
           headers: { "X-RapidAPI-Key": apiKey, "X-RapidAPI-Host": "jsearch.p.rapidapi.com" },
           next: { revalidate: 1800 },
