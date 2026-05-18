@@ -24,6 +24,7 @@ const SOURCE_COLORS: Record<string, string> = {
   Remotive: "#dc2626",
   RemoteOK: "#0891b2",
   LinkedIn: "#0a66c2",
+  "LinkedIn Easy Apply": "#0073b1",
   Indeed: "#003a9b",
   ZipRecruiter: "#5d7cea",
   Glassdoor: "#0caa41",
@@ -144,14 +145,11 @@ export default function JobSearchView({ onTracked }: { onTracked: () => void }) 
     return m ? Number(m[1]) * 1000 : 0;
   }
 
-  // Jobs after date filter only — used for per-board chip counts and hero total.
-  // The source filter is NOT applied here so all board chips remain visible.
   const dateFilteredJobs = useMemo(() => {
     if (datePosted === "all") return jobs;
     return jobs.filter((j) => withinDatePosted(j.posted, datePosted));
   }, [jobs, datePosted]);
 
-  // Per-board counts, recomputed whenever the date filter changes.
   const bySourceForDate = useMemo(() => {
     const m: Record<string, number> = {};
     for (const j of dateFilteredJobs) m[j.source] = (m[j.source] || 0) + 1;
@@ -196,7 +194,7 @@ export default function JobSearchView({ onTracked }: { onTracked: () => void }) 
       <header className="jobs-hero">
         <div>
           <h1 className="page-title">SDR &amp; BDR Jobs</h1>
-          <p className="page-sub">Live roles aggregated from Indeed, ZipRecruiter, LinkedIn, Glassdoor, Remotive, RemoteOK, and 100+ company career pages.</p>
+          <p className="page-sub">Live roles aggregated from Indeed, ZipRecruiter, LinkedIn (incl. Easy Apply), Glassdoor, Remotive, RemoteOK, and 100+ company career pages.</p>
         </div>
         <div className="jobs-hero-stats">
           <div className="hero-stat">
@@ -234,7 +232,7 @@ export default function JobSearchView({ onTracked }: { onTracked: () => void }) 
               title={`Show only ${k} jobs (click again to clear)`}
             >
               <span className="source-dot" style={{ background: SOURCE_COLORS[k] || "#999" }} />
-              <strong>{k}</strong>
+              <strong>{k === "LinkedIn Easy Apply" ? "⚡ LinkedIn Easy Apply" : k}</strong>
               <span className="source-count">{v}</span>
             </button>
           ))}
@@ -318,7 +316,9 @@ export default function JobSearchView({ onTracked }: { onTracked: () => void }) 
                 <div className="job-row-main">
                   <div className="job-row-titleline">
                     <a className="job-row-title" href={j.url} target="_blank" rel="noopener">{j.title}</a>
-                    <span className="job-row-source" style={{ color: SOURCE_COLORS[j.source] || "#666", borderColor: SOURCE_COLORS[j.source] || "#ccc" }}>{j.source}</span>
+                    <span className="job-row-source" style={{ color: SOURCE_COLORS[j.source] || "#666", borderColor: SOURCE_COLORS[j.source] || "#ccc" }}>
+                      {j.source === "LinkedIn Easy Apply" ? "⚡ Easy Apply" : j.source}
+                    </span>
                   </div>
                   <div className="job-row-company">{j.company}</div>
                   <div className="job-row-meta">
