@@ -41,7 +41,6 @@ async function timedFetch(url: string, init: RequestInit & { next?: any } = {}, 
   }
 }
 
-// Detects whether a JSearch job is LinkedIn Easy Apply.
 function isLinkedInEasyApply(j: any): boolean {
   if (Array.isArray(j?.apply_options)) {
     const hasDirect = j.apply_options.some((opt: any) =>
@@ -51,6 +50,18 @@ function isLinkedInEasyApply(j: any): boolean {
   }
   const link = j?.job_apply_link || "";
   return /linkedin\.com\/jobs\/view\//i.test(link);
+}
+
+// Detect LinkedIn from any field — publisher, apply link, or apply_options.
+function isLinkedInJob(j: any): boolean {
+  const pub = (j?.job_publisher || "").toLowerCase();
+  if (pub.includes("linkedin")) return true;
+  const link = (j?.job_apply_link || "").toLowerCase();
+  if (link.includes("linkedin.com")) return true;
+  if (Array.isArray(j?.apply_options)) {
+    if (j.apply_options.some((o: any) => /linkedin/i.test(o?.publisher || "") || /linkedin\.com/i.test(o?.apply_link || ""))) return true;
+  }
+  return false;
 }
 
 function normalizePublisher(raw: string): string {
@@ -77,13 +88,20 @@ function normalizePublisher(raw: string): string {
 }
 
 function mapJSearchJob(j: any, idPrefix = "jsearch"): Job {
-  const publisher = normalizePublisher(j.job_publisher || "");
-  const easyApply = publisher === "LinkedIn" && isLinkedInEasyApply(j);
-  const source = easyApply ? "LinkedIn Easy Apply" : publisher;
+  // Two-step LinkedIn detection: trust publisher first, but if a non-LinkedIn
+  // publisher is reported yet the apply_link / apply_options point to LinkedIn,
+  // promote it to LinkedIn anyway.
+  const fromPublisher = normalizePublisher(j.job_publisher || "");
+  const linkedin = fromPublisher === "LinkedIn" || isLinkedInJob(j);
+  const easyApply = linkedin && isLinkedInEasyApply(j);
+  const source = easyApply ? "LinkedIn Easy Apply" : (linkedin ? "LinkedIn" : fromPublisher);
   const sMin = j.job_min_salary;
   let url = j.job_apply_link || j.job_google_link || "";
   if (easyApply && Array.isArray(j.apply_options)) {
     const liOpt = j.apply_options.find((o: any) => /linkedin/i.test(o?.publisher || ""));
+    if (liOpt?.apply_link) url = liOpt.apply_link;
+  } else if (linkedin && Array.isArray(j.apply_options)) {
+    const liOpt = j.apply_options.find((o: any) => /linkedin/i.test(o?.publisher || "") || /linkedin\.com/i.test(o?.apply_link || ""));
     if (liOpt?.apply_link) url = liOpt.apply_link;
   }
   return {
@@ -159,14 +177,11 @@ async function fetchAdzuna(minSalary: number): Promise<Job[]> {
   try {
     const queries = ["remote sales development representative", "remote business development representative", "remote SDR", "remote BDR"];
     const pages = [1, 2];
-    // Fan out all query/page combinations in parallel.
     const tasks: Promise<Response | null>[] = [];
-    const meta: { q: string; page: number }[] = [];
     for (const q of queries) {
       for (const page of pages) {
         const url = `https://api.adzuna.com/v1/api/jobs/us/search/${page}?app_id=${appId}&app_key=${apiKey}&what=${encodeURIComponent(q)}&results_per_page=50${minSalary > 0 ? `&salary_min=${minSalary}` : ""}`;
         tasks.push(timedFetch(url, { next: { revalidate: 1800 } } as any, 4000));
-        meta.push({ q, page });
       }
     }
     const responses = await Promise.allSettled(tasks);
@@ -193,42 +208,12 @@ async function fetchAdzuna(minSalary: number): Promise<Job[]> {
   } catch { return []; }
 }
 
-// Dedicated LinkedIn-only JSearch pass. Tags Easy Apply jobs as a separate source.
-// Parallelized so it finishes in ~5s regardless of how many queries.
-async function fetchJSearchLinkedIn(minSalary: number): Promise<Job[]> {
-  const apiKey = process.env.RAPIDAPI_KEY;
-  if (!apiKey) return [];
-  try {
-    const queries = ["Sales Development Representative", "Business Development Representative"];
-    const tasks = queries.map((q) => {
-      const url = `https://jsearch.p.rapidapi.com/search?query=${encodeURIComponent(q)}&page=1&num_pages=1&date_posted=month&remote_jobs_only=true&job_publishers=LinkedIn`;
-      return timedFetch(url, {
-        headers: { "X-RapidAPI-Key": apiKey, "X-RapidAPI-Host": "jsearch.p.rapidapi.com" },
-        next: { revalidate: 1800 },
-      } as any, 6000);
-    });
-    const responses = await Promise.allSettled(tasks);
-    const out: Job[] = [];
-    for (const r of responses) {
-      if (r.status !== "fulfilled" || !r.value || !r.value.ok) continue;
-      const data: any = await r.value.json();
-      const items = data.data || [];
-      for (const j of items) {
-        if (!matchesSdrBdr(j.job_title || "")) continue;
-        const sMin = j.job_min_salary;
-        if (minSalary > 0 && sMin && sMin < minSalary) continue;
-        out.push(mapJSearchJob(j, "jsearch-li"));
-      }
-    }
-    return out;
-  } catch { return []; }
-}
-
+// JSearch — parallel fetches, no invalid filter params.
 async function fetchJSearch(minSalary: number): Promise<Job[]> {
   const apiKey = process.env.RAPIDAPI_KEY;
   if (!apiKey) return [];
   try {
-    const queries = ["Sales Development Representative", "Business Development Representative"];
+    const queries = ["Sales Development Representative", "Business Development Representative", "SDR remote", "BDR remote"];
     const pages = [1, 2];
     const tasks: Promise<Response | null>[] = [];
     for (const q of queries) {
@@ -350,23 +335,19 @@ async function fetchATS(): Promise<Job[]> {
 }
 
 export async function fetchAllSdrBdrJobs(minSalary: number = 0): Promise<{ jobs: Job[]; bySource: Record<string, number> }> {
-  const [remotive, remoteok, adzuna, jsearchLI, jsearch, ats] = await Promise.allSettled([
+  const [remotive, remoteok, adzuna, jsearch, ats] = await Promise.allSettled([
     fetchRemotive(),
     fetchRemoteOK(),
     fetchAdzuna(minSalary),
-    fetchJSearchLinkedIn(minSalary),
     fetchJSearch(minSalary),
     fetchATS(),
   ]);
 
-  // Order matters for dedup: LinkedIn Easy Apply pass runs BEFORE the general
-  // JSearch pass so any duplicates retain their Easy Apply label.
   const all: Job[] = [
-    ...(jsearchLI.status === "fulfilled" ? jsearchLI.value : []),
+    ...(jsearch.status === "fulfilled" ? jsearch.value : []),
     ...(remotive.status === "fulfilled" ? remotive.value : []),
     ...(remoteok.status === "fulfilled" ? remoteok.value : []),
     ...(adzuna.status === "fulfilled" ? adzuna.value : []),
-    ...(jsearch.status === "fulfilled" ? jsearch.value : []),
     ...(ats.status === "fulfilled" ? ats.value : []),
   ];
 
