@@ -15,7 +15,8 @@
     "next-auth": "^4.24.10",
     "@vercel/postgres": "^0.10.0",
     "googleapis": "^144.0.0",
-    "@anthropic-ai/sdk": "^0.88.0"
+    "@anthropic-ai/sdk": "^0.88.0",
+    "jspdf": "^2.5.2"
   },
   "devDependencies": {
     "@types/node": "^20.16.10",
