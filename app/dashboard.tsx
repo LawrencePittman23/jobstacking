@@ -183,6 +183,8 @@ export default function Dashboard({ userEmail, userName }: { userEmail: string; 
               </div>
             </header>
 
+            <ClockWidget />
+
             {syncStatus && <div className="banner">{syncStatus}</div>}
 
             <section className="stats">
@@ -295,6 +297,176 @@ export default function Dashboard({ userEmail, userName }: { userEmail: string; 
       )}
 
       {coverJob && <CoverLetterModal job={coverJob} onClose={() => setCoverJob(null)} />}
+    </div>
+  );
+}
+
+// --- Clock In / Out widget ----------------------------------------------------
+// Persists sessions in localStorage so they survive reloads. Tracks today + week
+// totals and shows a live ticking timer while clocked in.
+
+interface ClockSession { start: string; end: string | null; }
+const CLOCK_STORAGE_KEY = "jobstacking_clock_sessions";
+
+function ClockWidget() {
+  const [sessions, setSessions] = useState<ClockSession[]>([]);
+  const [, setTick] = useState(0);
+
+  // Hydrate from localStorage on mount.
+  useEffect(() => {
+    try {
+      const raw = typeof window !== "undefined" ? window.localStorage.getItem(CLOCK_STORAGE_KEY) : null;
+      if (raw) setSessions(JSON.parse(raw));
+    } catch {}
+  }, []);
+
+  const active = sessions.find((s) => !s.end);
+
+  // Tick once a second while clocked in so the live timer updates.
+  useEffect(() => {
+    if (!active) return;
+    const id = setInterval(() => setTick((t) => t + 1), 1000);
+    return () => clearInterval(id);
+  }, [active]);
+
+  function save(next: ClockSession[]) {
+    setSessions(next);
+    try { window.localStorage.setItem(CLOCK_STORAGE_KEY, JSON.stringify(next)); } catch {}
+  }
+
+  function clockIn() {
+    if (active) return;
+    save([...sessions, { start: new Date().toISOString(), end: null }]);
+  }
+
+  function clockOut() {
+    if (!active) return;
+    const now = new Date().toISOString();
+    save(sessions.map((s) => (s.end ? s : { ...s, end: now })));
+  }
+
+  function durationMs(s: ClockSession): number {
+    const end = s.end ? new Date(s.end).getTime() : Date.now();
+    return Math.max(0, end - new Date(s.start).getTime());
+  }
+
+  function fmtTimer(ms: number): string {
+    const total = Math.floor(ms / 1000);
+    const h = String(Math.floor(total / 3600)).padStart(2, "0");
+    const m = String(Math.floor((total % 3600) / 60)).padStart(2, "0");
+    const s = String(total % 60).padStart(2, "0");
+    return `${h}:${m}:${s}`;
+  }
+
+  function fmtDur(ms: number): string {
+    const total = Math.floor(ms / 1000);
+    const h = Math.floor(total / 3600);
+    const m = Math.floor((total % 3600) / 60);
+    if (h > 0) return `${h}h ${m}m`;
+    if (m > 0) return `${m}m`;
+    return `${total}s`;
+  }
+
+  const todayIso = isoDate(new Date());
+  const weekStartIso = isoDate(startOfWeek(new Date()));
+  const todayMs = sessions.filter((s) => s.start.slice(0, 10) === todayIso).reduce((sum, s) => sum + durationMs(s), 0);
+  const weekMs = sessions.filter((s) => s.start.slice(0, 10) >= weekStartIso).reduce((sum, s) => sum + durationMs(s), 0);
+  const totalSessions = sessions.filter((s) => s.start.slice(0, 10) === todayIso).length;
+
+  return (
+    <div
+      style={{
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "space-between",
+        gap: 16,
+        padding: "14px 18px",
+        marginBottom: 18,
+        background: "linear-gradient(135deg, var(--surface) 0%, var(--surface-2) 100%)",
+        border: "1px solid var(--border)",
+        borderRadius: "var(--radius)",
+        boxShadow: "var(--shadow-sm)",
+        flexWrap: "wrap",
+      }}
+    >
+      <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+        <span style={{ fontSize: 24 }}>⏱️</span>
+        <div>
+          <div style={{ fontWeight: 700, fontSize: 14, color: "var(--text)" }}>
+            {active ? "Clocked in" : "Time tracker"}
+          </div>
+          <div style={{ fontSize: 12, color: "var(--text-muted)" }}>
+            {active
+              ? `Started at ${new Date(active.start).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`
+              : totalSessions > 0
+                ? `${totalSessions} session${totalSessions === 1 ? "" : "s"} today`
+                : "Track your job-hunting hours"}
+          </div>
+        </div>
+      </div>
+
+      <div style={{ display: "flex", alignItems: "center", gap: 18, flexWrap: "wrap" }}>
+        <div style={{ display: "flex", gap: 16, fontSize: 12, color: "var(--text-muted)" }}>
+          <span>Today <strong style={{ color: "var(--text)", fontWeight: 700, marginLeft: 4, fontSize: 14 }}>{fmtDur(todayMs)}</strong></span>
+          <span>Week <strong style={{ color: "var(--text)", fontWeight: 700, marginLeft: 4, fontSize: 14 }}>{fmtDur(weekMs)}</strong></span>
+        </div>
+
+        {active ? (
+          <button
+            onClick={clockOut}
+            style={{
+              background: "var(--danger)",
+              color: "#fff",
+              border: "none",
+              borderRadius: "var(--radius-sm)",
+              padding: "10px 18px",
+              fontWeight: 700,
+              fontSize: 14,
+              cursor: "pointer",
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 10,
+              fontVariantNumeric: "tabular-nums",
+              minWidth: 180,
+              justifyContent: "center",
+            }}
+          >
+            <span
+              style={{
+                width: 8,
+                height: 8,
+                borderRadius: "50%",
+                background: "#fff",
+                display: "inline-block",
+                animation: "pulse 1.6s infinite",
+              }}
+            />
+            {fmtTimer(durationMs(active))}
+            <span style={{ marginLeft: 4, opacity: 0.9 }}>· Clock out</span>
+          </button>
+        ) : (
+          <button
+            onClick={clockIn}
+            style={{
+              background: "var(--primary)",
+              color: "#fff",
+              border: "none",
+              borderRadius: "var(--radius-sm)",
+              padding: "10px 18px",
+              fontWeight: 700,
+              fontSize: 14,
+              cursor: "pointer",
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 8,
+            }}
+          >
+            ▶ Clock in
+          </button>
+        )}
+      </div>
+
+      <style>{`@keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}`}</style>
     </div>
   );
 }
